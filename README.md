@@ -6,6 +6,8 @@ The core problem I wanted to solve was keeping track of all the interdependencie
 **QUICKSTART**
 
 Copy the content of v6.5_Cline Recursive Chain-of-Thought System (CRCT).md and paste it into the area for cline's system prompt. The system should be able to bootstrap off very little information by asking you a few guiding questions, but I'd suggest at least getting a rough plan together to start with.
+
+New version v6.6 adds validation loop to help the LLM keep track of the current activity. This should extend usefulness for larger contexts, but will likely result in many more API calls. Use this if you have no other choice. I am working on a few approaches for better validation with fewer steps, no current ETA.
 ---
 
 Here's a quick rundown of the key features:
