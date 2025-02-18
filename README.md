@@ -4,7 +4,8 @@ The core problem I wanted to solve was keeping track of all the interdependencie
 
 ---
 **QUICKSTART**
-Just copy the content of the CRCT prompt file and paste it into the area for cline's system prompt. The system should be able to bootstrap off very little information by asking you a few guiding questions, but I'd suggest at least getting a rough plan together to start with.
+
+Copy the content of v6.5_Cline Recursive Chain-of-Thought System (CRCT).md and paste it into the area for cline's system prompt. The system should be able to bootstrap off very little information by asking you a few guiding questions, but I'd suggest at least getting a rough plan together to start with.
 ---
 
 Here's a quick rundown of the key features:
