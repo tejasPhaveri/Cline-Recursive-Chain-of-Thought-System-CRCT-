@@ -3,6 +3,11 @@ I've been working on a way to manage context and dependencies in larger Cline pr
 The core problem I wanted to solve was keeping track of all the interdependencies between files, modules, and documentation, and ensuring the LLM always has the *right* context loaded at the *right* time. This system uses a recursive, file-based approach with a very strict dependency tracking system and a mandatory update protocol to address that.
 
 ---
+My complete dependency list is still being populated, but our current method holds significant token savings (current size 1.9 effeciency ratio, or 90% fewer characters) vs. the base method of writing full names for each of the fields. This becomes more significant the larger and more intracate the project's dependencies become. My immediate plans are to refactor how dependencies are stored yet again, which should extend the benefits to projects that contain less complexity by extending the token savings along another dimension/axis.
+
+![image](https://github.com/user-attachments/assets/c8848f89-7edf-49c0-b7ca-c108fce49b6f)
+
+---
 **QUICKSTART**
 
 Copy the content of v6.5_Cline Recursive Chain-of-Thought System (CRCT).md and paste it into the area for cline's system prompt. The system should be able to bootstrap off very little information by asking you a few guiding questions, but I'd suggest at least getting a rough plan together to start with.
