@@ -12,7 +12,8 @@ My complete dependency list is still being populated, but our current method hol
 
 Copy the content of v6.5_Cline Recursive Chain-of-Thought System (CRCT).md and paste it into the area for cline's system prompt. The system should be able to bootstrap off very little information by asking you a few guiding questions, but I'd suggest at least getting a rough plan together to start with.
 
-New version v6.6 adds validation loop to help the LLM keep track of the current activity. This should extend usefulness for larger contexts, but will likely result in many more API calls. Use this if you have no other choice. I am working on a few approaches for better validation with fewer steps, no current ETA.
+New version v6.7 refactors the dependency tracking system to use a grid-based format with hierarchical keys and RLE compression. This change improves efficiency and reduces redundancy in the dependency tracker files. This should make larger projects consume significantly fewer tokens to track and manage dependencies. Initial tests suggest a potential efficiency ratio of around 2.25. This means the grid-based system could represent the same dependency information with approximately 44% fewer tokens (1 - 1/2.25 = ~0.56, or 56% of the original token count, hence a ~44% reduction).
+This new version responds fairly well by simply saying, "Start.", as your initial input. (may be buggy with this initial version)
 ---
 
 Here's a quick rundown of the key features:
