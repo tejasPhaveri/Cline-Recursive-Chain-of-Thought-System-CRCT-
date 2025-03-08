@@ -1,39 +1,109 @@
-I've been working on a way to manage context and dependencies in larger Cline projects, especially as the project grows and the context window starts to fill up. Inspired by the Cline memory bank, I've developed a system prompt called the **Cline Recursive Chain-of-Thought System (CRCT)** that I'd like to share.
+# Cline Recursive Chain-of-Thought System (CRCT) - v7.0
 
-The core problem I wanted to solve was keeping track of all the interdependencies between files, modules, and documentation, and ensuring the LLM always has the *right* context loaded at the *right* time. This system uses a recursive, file-based approach with a very strict dependency tracking system and a mandatory update protocol to address that.
+Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework designed to manage context, dependencies, and tasks in large-scale Cline projects within VS Code. Built for the Cline extension, CRCT leverages a recursive, file-based approach with a modular dependency tracking system to keep your project's state persistent and efficient, even as complexity grows.
 
----
-My complete dependency list is still being populated, but our current method holds significant token savings (current size 1.9 effeciency ratio, or 90% fewer characters) vs. the base method of writing full names for each of the fields. This becomes more significant the larger and more intracate the project's dependencies become. My immediate plans are to refactor how dependencies are stored yet again, which should extend the benefits to projects that contain less complexity by extending the token savings along another dimension/axis.
-
-![image](https://github.com/user-attachments/assets/c8848f89-7edf-49c0-b7ca-c108fce49b6f)
+This is **v7.0**, a basic but functional release of an ongoing refactor to improve dependency tracking modularity. While the full refactor is still in progress (stay tuned!), this version offers a stable starting point for community testing and feedback. It includes base templates for all core files and the new `dependency_processor.py` script.
 
 ---
-**QUICKSTART**
 
-Copy the content of v6.5_Cline Recursive Chain-of-Thought System (CRCT).md and paste it into the area for cline's system prompt. The system should be able to bootstrap off very little information by asking you a few guiding questions, but I'd suggest at least getting a rough plan together to start with.
+## Key Features
 
-New version v6.7 refactors the dependency tracking system to use a grid-based format with hierarchical keys and RLE compression. This change improves efficiency and reduces redundancy in the dependency tracker files. This should make larger projects consume significantly fewer tokens to track and manage dependencies. Initial tests suggest a potential efficiency ratio of around 2.25. This means the grid-based system could represent the same dependency information with approximately 44% fewer tokens (1 - 1/2.25 = ~0.56, or 56% of the original token count, hence a ~44% reduction).
-This new version responds fairly well by simply saying, "Start.", as your initial input. (may be buggy with this initial version)
+- **Recursive Decomposition**: Breaks tasks into manageable subtasks, organized via directories and files for isolated context management.
+- **Minimal Context Loading**: Loads only essential data, expanding via dependency trackers as needed.
+- **Persistent State**: Uses the VS Code file system to store context, instructions, outputs, and dependencies—kept up-to-date via a **Mandatory Update Protocol (MUP)**.
+- **Modular Dependency Tracking**: 
+  - `dependency_tracker.md` (module-level dependencies)
+  - `doc_tracker.md` (documentation dependencies)
+  - Mini-trackers (file/function-level within modules)
+  - Uses hierarchical keys and RLE compression for efficiency (~90% fewer characters vs. full names in initial tests).
+- **Phase-Based Workflow**: Operates in distinct phases—**Set-up/Maintenance**, **Strategy**, **Execution**—controlled by `.clinerules`.
+- **Chain-of-Thought Reasoning**: Ensures transparency with step-by-step reasoning and reflection.
+
 ---
 
-Here's a quick rundown of the key features:
+## Quickstart
 
-* **Recursive Decomposition:** Tasks are broken down into smaller, manageable subtasks, organized using directories and files. This helps to isolate context and keep things organized.
-* **Minimal Context Loading:** Only essential information is loaded initially. The system relies heavily on the dependency trackers to load additional context *only* when needed.
-* **Persistent State:** The Cline VS Code file system is used for persistent storage of everything: context, instructions, outputs, and (most importantly) dependencies.
-* **Explicit & Automated Dependency Tracking:** This is the heart of the system. It uses a main `dependency_tracker.md` file (for module-level and documentation dependencies) and "mini-trackers" within instruction files (for file-level and function-level dependencies). A shortcode system keeps things efficient.
-* **Mandatory Update Protocol:** This is a strict rule: *any* time *anything* changes in the project (a file is created, a dependency is added, a plan is revised), the LLM *must* immediately update the relevant trackers and the `activeContext.md` file. This keeps the persistent state consistent.
-* **Multi-tiered Instruction Files:** The system uses "main task instruction files" (for directories) and "file-specific instruction files" to provide clear, granular instructions.
+1. **Clone the Repo**: 
+   ```bash
+   git clone https://github.com/RPG-fan/Cline-Recursive-Chain-of-Thought-System-CRCT-.git
+   cd Cline-Recursive-Chain-of-Thought-System-CRCT-
+   ```
 
-It's still a work in progress, and I'm actively refining it. I'd be incredibly grateful for any feedback, suggestions, or bug reports if you decide to try it out!
+2. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-**Getting Started (Optional - for testing on existing projects):**
+3. **Set Up Cline Extension**:
+   - Open the project in VS Code with the Cline extension installed.
+   - Copy `cline_docs/prompts/core_prompt(put this in Custom Instructions).md` into the Cline system prompt field.
 
-If you want to try this on a copy of an existing project, here are a couple of helpful starting statements to get the LLM going:
+4. **Start the System**:
+   - Type `Start.` in the Cline input to initialize the system.
+   - The LLM will bootstrap from `.clinerules`, creating missing files and guiding you through setup if needed.
 
-1. `Perform a project-wide dependency analysis and update the dependency_tracker.md file.`
-2. `Before we move on, are you sure the edits you made are all appropriate?`
+*Note*: The Cline extension’s LLM automates most commands and updates to `cline_docs/`. Minimal user intervention is required (in theory!).
 
-These statements help kickstart the dependency tracking and encourage the LLM to double-check its work, which is crucial for this system.
+---
 
-Thanks for taking a look! Let me know what you think.
+## Project Structure
+
+```
+cline/
+│   .clinerules              # Controls phase and state
+│   README.md                # This file
+│   requirements.txt         # Python dependencies
+│
+├───cline_docs/              # Operational memory
+│   │   activeContext.md     # Current state and priorities
+│   │   changelog.md         # Logs significant changes
+│   │   productContext.md    # Project purpose and user needs
+│   │   progress.md          # Tracks progress
+│   │   projectbrief.md      # Mission and objectives
+│   │   dependency_tracker.md # Module-level dependencies
+│   │   ...                  # Additional templates
+│   └───prompts/             # System prompts and plugins
+│       core_prompt.md       # Core system instructions
+│       setup_maintenance_plugin.md
+│       strategy_plugin.md
+│       execution_plugin.md
+│
+├───cline_utils/             # Utility scripts
+│   └───dependency_system/
+│       dependency_processor.py # Dependency management script
+│
+├───docs/                    # Project documentation
+│   │   doc_tracker.md       # Documentation dependencies
+│
+├───src/                     # Source code root
+│
+└───strategy_tasks/          # Strategic plans
+```
+
+---
+
+## Current Status & Future Plans
+
+- **v7.0**: A basic, functional release with modular dependency tracking via `dependency_processor.py`. Includes templates for all `cline_docs/` files.
+- **Efficiency**: Achieves a ~1.9 efficiency ratio (90% fewer characters) for dependency tracking vs. full names—improving with scale.
+- **Ongoing Refactor**: I’m enhancing modularity and token efficiency further. The next version will refine dependency storage and extend savings to simpler projects.
+
+Feedback is welcome! Please report bugs or suggestions via GitHub Issues.
+
+---
+
+## Getting Started (Optional - Existing Projects)
+
+To test on an existing project:
+1. Copy your project into `src/`.
+2. Use these prompts to kickstart the LLM:
+   - `Perform initial setup and populate dependency trackers.`
+   - `Review the current state and suggest next steps.`
+
+The system will analyze your codebase, initialize trackers, and guide you forward.
+
+---
+
+## Thanks!
+
+This is a labor of love to make Cline projects more manageable. I’d love to hear your thoughts—try it out and let me know what works (or doesn’t)!
