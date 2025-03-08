@@ -4,6 +4,7 @@ import os
 import io
 import json
 import struct
+import sys
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional
 
@@ -13,7 +14,7 @@ from sentence_transformers import SentenceTransformer
 ASCII_A = 65  # ASCII value for 'A'
 
 
-def generate_keys(root_paths: List[str]) -> Dict[str, str]:
+def generate_keys(root_paths: List[str]) -> Tuple[Dict[str, str], bool]:
     """Generate hierarchical keys."""
     if isinstance(root_paths, str):
         root_paths = [root_paths]
@@ -31,19 +32,18 @@ def generate_keys(root_paths: List[str]) -> Dict[str, str]:
         nonlocal dir_to_letter, key_map, new_keys_added
 
         if parent_key is None:  # Top-level directory
-            dir_name = os.path.basename(dir_path)
             dir_letter = chr(ASCII_A + len(dir_to_letter))
             norm_dir_path = os.path.normpath(dir_path)
             dir_to_letter[norm_dir_path] = dir_letter
             key = f"{tier}{dir_letter}"
             if key not in key_map:
                 key_map[key] = norm_dir_path.replace("\\", "/")
-                new_keys_added = True  # Mark that a new key was added
+                new_keys_added = True
         else:
             key = parent_key
 
         try:
-            items = sorted(os.listdir(dir_path))  # Get items only once
+            items = sorted(os.listdir(dir_path))
         except OSError as e:
             print(f"Error accessing directory '{dir_path}': {e}")
             return
@@ -55,7 +55,7 @@ def generate_keys(root_paths: List[str]) -> Dict[str, str]:
             item_path = os.path.join(dir_path, item_name)
             norm_item_path = os.path.normpath(item_path).replace("\\", "/")
 
-            if item_name == "__pycache__" or item_name == ".gitkeep":
+            if item_name in ("__pycache__", ".gitkeep"):
                 continue
 
             if os.path.isfile(item_path):
@@ -75,7 +75,8 @@ def generate_keys(root_paths: List[str]) -> Dict[str, str]:
 
     for root_path in root_paths:
         process_directory(root_path)
-    return key_map, new_keys_added # Return the map *and* the flag
+    return key_map, new_keys_added
+
 
 def _parse_count(s: str, start: int) -> Tuple[int, int]:
     """Helper function to parse the count from a string."""
@@ -84,6 +85,7 @@ def _parse_count(s: str, start: int) -> Tuple[int, int]:
         j += 1
     return int(s[start:j]), j
 
+
 def compress(s: str) -> str:
     """Compress a dependency string (RLE, excluding 'o')."""
     return re.sub(
@@ -91,6 +93,7 @@ def compress(s: str) -> str:
         lambda m: m.group(1) + str(len(m.group())),
         s
     )
+
 
 def decompress(s: str) -> str:
     """Decompress a compressed dependency string."""
@@ -105,6 +108,7 @@ def decompress(s: str) -> str:
             result += s[i]
             i += 1
     return result
+
 
 def get_char_at(s: str, index: int) -> str:
     """Get the character at a specific index in the decompressed string."""
@@ -124,6 +128,7 @@ def get_char_at(s: str, index: int) -> str:
             i += 1
     raise IndexError("Index out of range")
 
+
 def set_char_at(s: str, index: int, new_char: str) -> str:
     """Set a character at a specific index and return the compressed string."""
     if not isinstance(new_char, str) or len(new_char) != 1:
@@ -138,11 +143,11 @@ def set_char_at(s: str, index: int, new_char: str) -> str:
 
 def _read_existing_keys(lines: List[str]) -> Dict[str, str]:
     """Reads existing key definitions from the tracker file content."""
-    KEY_DEF_START = "---KEY_DEFINITIONS_START---"
-    KEY_DEF_END = "---KEY_DEFINITIONS_END---"
+    key_def_start = "---KEY_DEFINITIONS_START---"
+    key_def_end = "---KEY_DEFINITIONS_END---"
     try:
-        start = lines.index(KEY_DEF_START + "\n") + 2
-        end = lines.index(KEY_DEF_END + "\n")
+        start = lines.index(key_def_start + "\n") + 2
+        end = lines.index(key_def_end + "\n")
         return {
             k: v
             for line in lines[start:end]
@@ -152,13 +157,14 @@ def _read_existing_keys(lines: List[str]) -> Dict[str, str]:
     except ValueError:
         return {}
 
+
 def _read_existing_grid(lines: List[str]) -> Dict[str, str]:
     """Reads the existing grid data from the tracker file content."""
-    GRID_START = "---GRID_START---"
-    GRID_END = "---GRID_END---"
+    grid_start = "---GRID_START---"
+    grid_end = "---GRID_END---"
     try:
-        start = lines.index(GRID_START + "\n") + 1
-        end = lines.index(GRID_END + "\n")
+        start = lines.index(grid_start + "\n") + 1
+        end = lines.index(grid_end + "\n")
         return {
             match.group(1): match.group(2)
             for line in lines[start:end]
@@ -167,11 +173,12 @@ def _read_existing_grid(lines: List[str]) -> Dict[str, str]:
     except ValueError:
         return {}
 
+
 def _write_key_definitions(file_obj: io.StringIO, key_map: Dict[str, str], sort_keys: bool = True):
     """Writes the key definitions section to the file object."""
-    KEY_DEF_START = "---KEY_DEFINITIONS_START---"
-    KEY_DEF_END = "---KEY_DEFINITIONS_END---"
-    file_obj.write(f"{KEY_DEF_START}\nKey Definitions:\n")
+    key_def_start = "---KEY_DEFINITIONS_START---"
+    key_def_end = "---KEY_DEFINITIONS_END---"
+    file_obj.write(f"{key_def_start}\nKey Definitions:\n")
     if sort_keys:
         def sort_key(key):
             parts = re.findall(r'\d+|\D+', key)
@@ -179,16 +186,17 @@ def _write_key_definitions(file_obj: io.StringIO, key_map: Dict[str, str], sort_
         for k, v in sorted(key_map.items(), key=lambda item: sort_key(item[0])):
             file_obj.write(f"{k}: {v}\n")
     else:
-        for k,v in key_map.items():
+        for k, v in key_map.items():
             file_obj.write(f"{k}: {v}\n")
-    file_obj.write(f"{KEY_DEF_END}\n")
+    file_obj.write(f"{key_def_end}\n")
+
 
 def _write_grid(file_obj: io.StringIO, sorted_keys: List[str], existing_grid: Dict[str, str]):
     """Writes the grid section to the provided file object."""
-    GRID_START = "---GRID_START---"
-    GRID_END = "---GRID_END---"
+    grid_start = "---GRID_START---"
+    grid_end = "---GRID_END---"
 
-    file_obj.write(f"{GRID_START}\n")
+    file_obj.write(f"{grid_start}\n")
     file_obj.write(f"X {' '.join(sorted_keys)}\n")
 
     for row_key in sorted_keys:
@@ -196,7 +204,7 @@ def _write_grid(file_obj: io.StringIO, sorted_keys: List[str], existing_grid: Di
         initial_string = compress(''.join(row))
         file_obj.write(f"{row_key} = {existing_grid.get(row_key, initial_string)}\n")
 
-    file_obj.write(f"{GRID_END}\n")
+    file_obj.write(f"{grid_end}\n")
 
 
 def extract_imports(file_path: str) -> List[str]:
@@ -234,7 +242,7 @@ def extract_imports(file_path: str) -> List[str]:
     except UnicodeDecodeError:
         print(f"Warning: Could not decode file {file_path} as UTF-8. Skipping.")
         return []
-    except Exception as e:
+    except OSError as e:
         print(f"Error reading file {file_path}: {e}")
         return []
 
@@ -252,6 +260,7 @@ def extract_imports(file_path: str) -> List[str]:
             resolved_imports.append(imp)
     return resolved_imports
 
+
 def find_explicit_references(file_path: str, doc_dir: str) -> List[str]:
     """Find explicit references to other documentation files."""
     references = []
@@ -260,27 +269,27 @@ def find_explicit_references(file_path: str, doc_dir: str) -> List[str]:
             content = f.read()
             norm_doc_dir = os.path.normpath(doc_dir)
             for match in re.findall(rf'(?:See|refer to)\s+({re.escape(norm_doc_dir)}/[\w\./-]+\.md)', content, re.IGNORECASE):
-                references.append(os.path.normpath(match).replace("\\","/"))
+                references.append(os.path.normpath(match).replace("\\", "/"))
     except UnicodeDecodeError:
         print(f"Warning: Could not decode file {file_path} as UTF-8. Skipping reference extraction.")
         return []
-    except Exception as e:
+    except OSError as e:
         print(f"Error reading file {file_path}: {e}")
         return []
 
     return references
 
+
 def _load_embedding(embedding_path: str) -> Optional[List[float]]:
     """Loads an embedding from a .embedding file."""
     try:
         with open(embedding_path, "rb") as f:
-            # Read all floats (little-endian)
             embedding = list(struct.unpack("<" + "f" * (os.path.getsize(embedding_path) // 4), f.read()))
             return embedding
     except FileNotFoundError:
         print(f"Embedding file not found: {embedding_path}")
         return None
-    except Exception as e:
+    except OSError as e:
         print(f"Error loading embedding from {embedding_path}: {e}")
         return None
 
@@ -291,48 +300,45 @@ def calculate_similarity(key1: str, key2: str, embeddings_dir: str) -> float:
     embedding2 = _load_embedding(os.path.join(embeddings_dir, f"{key2}.embedding"))
 
     if embedding1 is None or embedding2 is None:
-        return 0.0  # Return 0 if either embedding is missing
+        return 0.0
 
-    # Cosine similarity
     dot_product = sum(a * b for a, b in zip(embedding1, embedding2))
     magnitude1 = sum(a * a for a in embedding1) ** 0.5
     magnitude2 = sum(b * b for b in embedding2) ** 0.5
 
     if magnitude1 == 0 or magnitude2 == 0:
-        return 0.0  # Avoid division by zero
+        return 0.0
     return dot_product / (magnitude1 * magnitude2)
 
 
 def generate_embeddings(root_paths: List[str], output_dir: str, model_name: str = "all-MiniLM-L6-v2"):
     """Generates embeddings for files and saves them, along with metadata."""
-
     if isinstance(root_paths, str):
         root_paths = [root_paths]
 
-    os.makedirs(output_dir, exist_ok=True)  # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
     metadata_file = os.path.join(output_dir, "metadata.json")
     metadata = {}
-    file_count = 0 #For progress indicator
+    file_count = 0
 
-    # Load existing metadata, if it exists.
     if os.path.exists(metadata_file):
         try:
             with open(metadata_file, "r", encoding="utf-8") as f:
                 metadata = json.load(f)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Warning: Could not read metadata file: {e}. Starting fresh.")
             metadata = {}
 
     try:
-        model = SentenceTransformer(model_name) #Load model outside of loop
-    except Exception as e:
-        print(f"Error: Could not load Sentence Transformer model '{model_name}'.  Ensure it's installed and the name is correct: {e}")
-        return
+        model = SentenceTransformer(model_name)
+    except ImportError as e:
+        print(f"Error: Could not load Sentence Transformer model '{model_name}'. Ensure it's installed: {e}")
+        sys.exit(1)
 
-    key_map = generate_keys(root_paths)[0]  # Generate keys to know what to embed, only grab the keymap
+    key_map = generate_keys(root_paths)[0]
 
     for key, path in key_map.items():
-        if not os.path.isfile(path): #Skip directories
+        if not os.path.isfile(path):
             continue
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -340,43 +346,34 @@ def generate_embeddings(root_paths: List[str], output_dir: str, model_name: str 
         except UnicodeDecodeError:
             print(f"Warning: Could not decode file {path} with UTF-8. Skipping embedding.")
             continue
-        except Exception as e:
+        except OSError as e:
             print(f"Error reading file {path}: {e}")
             continue
 
         try:
-            # Generate embedding
-            embedding = model.encode(content).tolist()  # Convert to list for JSON serialization
-
-            # Save embedding to file
+            embedding = model.encode(content).tolist()
             embedding_file = os.path.join(output_dir, f"{key}.embedding")
             with open(embedding_file, "wb") as f:
-                f.write(struct.pack("<" + "f" * len(embedding), *embedding))  # Little-endian floats
-
-            # Update metadata
+                f.write(struct.pack("<" + "f" * len(embedding), *embedding))
             metadata[key] = {
                 "path": path,
-                "embedding_file": os.path.basename(embedding_file),  # Store just the filename
-                "text": content[:200] + "..." if len(content) > 200 else content,  # Store excerpt
-                # "keywords":  [],  # Could add keyword extraction here
+                "embedding_file": os.path.basename(embedding_file),
+                "text": content[:200] + "..." if len(content) > 200 else content,
             }
             file_count += 1
-            print(f"Processed file: {file_count} / {len(key_map)}", end='\r') #Progress
-
-        except Exception as e:
+            print(f"Processed file: {file_count} / {len(key_map)}", end='\r')
+        except OSError as e:
             print(f"Error processing file {path}: {e}")
-            continue #Keep going
+            continue
     print(f"\nEmbeddings and metadata saved to {output_dir}")
-    # Save updated metadata
     with open(metadata_file, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=4)
-
 
 
 def suggest_dependencies(tracker_file: str, tracker_type: str, key_map: Dict[str, str]) -> Dict[str, List[Tuple[str, str]]]:
     """Suggest dependencies based on tracker type and file content."""
     suggestions: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
-    embeddings_dir = os.path.join(os.path.dirname(tracker_file), "embeddings") #Assuming same directory
+    embeddings_dir = os.path.join(os.path.dirname(tracker_file), "embeddings")
     metadata_path = os.path.join(embeddings_dir, "metadata.json")
 
     if tracker_type == "main":
@@ -390,31 +387,28 @@ def suggest_dependencies(tracker_file: str, tracker_type: str, key_map: Dict[str
                             suggestions[other_key].append((key, '>'))
 
     elif tracker_type == "doc":
-        #Load Metadata
+        if not os.path.exists(metadata_path):
+            print(f"Error: Metadata file '{metadata_path}' not found. Run 'generate-embeddings' first.")
+            sys.exit(1)
         try:
-            with open(metadata_path, 'r') as f:
+            with open(metadata_path, "r", encoding="utf-8") as f:
                 metadata = json.load(f)
-        except FileNotFoundError:
-            print(f"Error: metadata file not found at {metadata_path}.  Run generate-embeddings first.")
-            return {}
-        except Exception as e:
-            print("Error reading metadata.json")
-            return {}
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Error reading metadata file '{metadata_path}': {e}")
+            sys.exit(1)
 
         for key, data in metadata.items():
-            # Explicit references
             for ref_path in find_explicit_references(data['path'], os.path.dirname(tracker_file)):
                 for other_key, other_path in key_map.items():
                     if os.path.normpath(other_path).replace("\\", "/") == ref_path:
                         suggestions[key].append((other_key, 'd'))
                         break
 
-            # Semantic similarity
-            for other_key, other_data in metadata.items():
-                if key != other_key:  # Don't compare to itself
+            for other_key in metadata:
+                if key != other_key:
                     similarity = calculate_similarity(key, other_key, embeddings_dir)
-                    if similarity > 0.8:  # Threshold for similarity
-                        suggestions[key].append((other_key, 'x'))  # Suggest mutual
+                    if similarity > 0.8:
+                        suggestions[key].append((other_key, 'x'))
 
     elif tracker_type == "mini":
         for key, path in key_map.items():
@@ -422,20 +416,19 @@ def suggest_dependencies(tracker_file: str, tracker_type: str, key_map: Dict[str
                 imported_modules = extract_imports(path)
                 for imported_module in imported_modules:
                     for other_key, other_path in key_map.items():
-                      if other_path.startswith(imported_module) and key != other_key:
+                        if other_path.startswith(imported_module) and key != other_key:
                             suggestions[key].append((other_key, '<'))
                             suggestions[other_key].append((key, '>'))
-
                     for other_key, other_path in key_map.items():
-                        if other_path.startswith(os.path.normpath(os.path.join(os.path.dirname(tracker_file),"../docs")).replace("\\", "/")):  # Check if it is in doc
+                        if other_path.startswith(os.path.normpath(os.path.join(os.path.dirname(tracker_file), "../docs")).replace("\\", "/")):
                             if imported_module in other_path:
                                 suggestions[key].append((other_key, 'd'))
 
     return suggestions
 
+
 def update_tracker(output_file: str, key_map: Dict[str, str], tracker_type: str = "mini", suggestions: Optional[Dict[str, List[Tuple[str, str]]]] = None, sort_keys: bool = True):
     """Updates or creates a tracker file."""
-
     def sort_key(key):
         parts = re.findall(r'\d+|\D+', key)
         return [int(p) if p.isdigit() else p for p in parts]
@@ -448,35 +441,33 @@ def update_tracker(output_file: str, key_map: Dict[str, str], tracker_type: str 
         }
     else:
         filtered_keys = key_map
-    #Sort if requested, otherwise keep the order
+
     sorted_keys = sorted(filtered_keys.keys(), key=sort_key) if sort_keys else list(filtered_keys.keys())
 
     if not os.path.exists(output_file):
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             _write_key_definitions(f, filtered_keys)
             f.write(f"last_KEY_edit: {sorted_keys[-1] if sorted_keys else ''}\n")
             f.write("last_GRID_edit: \n")
             _write_grid(f, sorted_keys, {})
     else:
-        with open(output_file, "r") as f:
+        with open(output_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
         existing_key_defs = _read_existing_keys(lines)
         existing_grid = _read_existing_grid(lines)
         last_key_edit_line = next((line for line in lines if line.startswith("last_KEY_edit")), None)
-        last_grid_edit_line = next((line for line in lines if line.startswith("last_GRID_edit")),None)
+        last_grid_edit_line = next((line for line in lines if line.startswith("last_GRID_edit")), None)
 
         last_key_edit = last_key_edit_line.split(":", 1)[1].strip() if last_key_edit_line else ""
         last_grid_edit = last_grid_edit_line.split(":", 1)[1].strip() if last_grid_edit_line else ""
 
-        # Merge existing and new keys
         merged_key_defs = existing_key_defs.copy()
-        merged_key_defs.update(filtered_keys)  # Add any *new* keys
-        #Sort if requested
+        merged_key_defs.update(filtered_keys)
         sorted_merged_keys = sorted(merged_key_defs.keys(), key=sort_key) if sort_keys else list(merged_key_defs.keys())
 
         updated_content = io.StringIO()
-        _write_key_definitions(updated_content, merged_key_defs) # Pass sort_key
+        _write_key_definitions(updated_content, merged_key_defs)
         updated_content.write(f"last_KEY_edit: {last_key_edit}\n")
         updated_content.write(f"last_GRID_edit: {last_grid_edit}\n")
         _write_grid(updated_content, sorted_merged_keys, existing_grid)
@@ -484,71 +475,77 @@ def update_tracker(output_file: str, key_map: Dict[str, str], tracker_type: str 
         if suggestions:
             updated_grid = existing_grid.copy()
             for row_key, deps in suggestions.items():
-                if row_key in updated_grid:
-                    current_row_str = updated_grid[row_key]
-                    decompressed = decompress(current_row_str)
+                if row_key not in sorted_merged_keys:
+                    print(f"Warning: Row key '{row_key}' not in tracker; skipping.")
+                    continue
+                current_row_str = updated_grid.get(row_key, compress(''.join(["o" if row_key == col_key else "p" for col_key in sorted_merged_keys])))
+                decompressed = decompress(current_row_str)
+                for col_key, dep_char in deps:
+                    if col_key not in sorted_merged_keys:
+                        print(f"Warning: Column key '{col_key}' not in tracker; skipping.")
+                        continue
+                    index = sorted_merged_keys.index(col_key)
+                    if index >= len(decompressed):
+                        print(f"Error: Index {index} out of bounds for row '{row_key}'; skipping.")
+                        continue
+                    if decompressed[index] == 'p':
+                        decompressed = decompressed[:index] + dep_char + decompressed[index + 1:]
+                    else:
+                        print(f"Warning: Skipping update at index {index} for row '{row_key}'; already set to '{decompressed[index]}'.")
+                updated_grid[row_key] = compress(decompressed)
 
-                    for col_key, dep_char in deps:
-                        if col_key in sorted_merged_keys: #Valid key
-                            try:
-                                index = sorted_merged_keys.index(col_key)
-                                if decompressed[index] == 'p':
-                                    decompressed = decompressed[:index] + dep_char + decompressed[index + 1:]
-                            except IndexError:
-                                print(f"Error: Index out of bounds for {row_key} and {col_key}")
-                    updated_grid[row_key] = compress(decompressed)
-
-            updated_content.seek(0) #Rewind
+            updated_content.seek(0)
             _write_key_definitions(updated_content, merged_key_defs)
             updated_content.write(f"last_KEY_edit: {last_key_edit}\n")
             updated_content.write(f"last_GRID_edit: {last_grid_edit}\n")
             _write_grid(updated_content, sorted_merged_keys, updated_grid)
 
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write(updated_content.getvalue())
         updated_content.close()
 
+
 def remove_file_from_tracker(output_file: str, file_to_remove: str):
     """Removes a file's key and row/column from the tracker."""
-    KEY_DEF_START = "---KEY_DEFINITIONS_START---"
-    KEY_DEF_END = "---KEY_DEFINITIONS_END---"
-    GRID_START = "---GRID_START---"
-    GRID_END = "---GRID_END---"
-    LAST_GRID_EDIT = "last_GRID_edit"
+    key_def_start = "---KEY_DEFINITIONS_START---"
+    key_def_end = "---KEY_DEFINITIONS_END---"
+    grid_start = "---GRID_START---"
+    grid_end = "---GRID_END---"
+    last_grid_edit = "last_GRID_edit"
 
     if not os.path.exists(output_file):
         raise FileNotFoundError(f"Tracker file '{output_file}' not found.")
 
-    with open(output_file, "r") as f:
+    with open(output_file, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     try:
-        key_def_start_index = lines.index(KEY_DEF_START + "\n") + 2
-        key_def_end_index = lines.index(KEY_DEF_END + "\n")
+        key_def_start_index = lines.index(key_def_start + "\n") + 2
+        key_def_end_index = lines.index(key_def_end + "\n")
         key_to_remove = next((k for line in lines[key_def_start_index:key_def_end_index]
                               if ": " in line
                               for k, v in [line.strip().split(": ", 1)]
                               if v == file_to_remove), None)
-    except ValueError:
-        raise ValueError("Key Definitions section not found.")
+    except ValueError as e:
+        raise ValueError("Key Definitions section not found.") from e
 
     if key_to_remove is None:
         raise ValueError(f"File '{file_to_remove}' not found in tracker.")
 
-    updated_lines = [KEY_DEF_START + "\n", "Key Definitions:\n"]
+    updated_lines = [key_def_start + "\n", "Key Definitions:\n"]
     for line in lines[key_def_start_index:key_def_end_index]:
         if ": " in line and not line.startswith(key_to_remove + ":"):
             updated_lines.append(line)
-    updated_lines.append(KEY_DEF_END + "\n")
+    updated_lines.append(key_def_end + "\n")
     last_key_edit_line = next((line for line in lines if line.startswith("last_KEY_edit")), None)
     if last_key_edit_line:
         updated_lines.append(last_key_edit_line)
-    updated_lines.append(f"{LAST_GRID_EDIT}: {key_to_remove}\n")
-    updated_lines.append(GRID_START + "\n")
+    updated_lines.append(f"{last_grid_edit}: {key_to_remove}\n")
+    updated_lines.append(grid_start + "\n")
 
     try:
-        grid_start_index = lines.index(GRID_START + "\n") + 1
-        grid_end_index = lines.index(GRID_END + "\n")
+        grid_start_index = lines.index(grid_start + "\n") + 1
+        grid_end_index = lines.index(grid_end + "\n")
         x_axis_line = lines[grid_start_index]
         x_axis_keys = x_axis_line.strip().split(" ", 1)[1].split()
 
@@ -570,22 +567,22 @@ def remove_file_from_tracker(output_file: str, file_to_remove: str):
                 updated_lines.append(f"{row_key} = {compress(updated_decompressed)}\n")
 
     except ValueError as e:
-        raise ValueError(f"Grid section error: {e}")
+        raise ValueError(f"Grid section error: {e}") from e
 
-    updated_lines.append(GRID_END + "\n")
-    with open(output_file, "w") as f:
+    updated_lines.append(grid_end + "\n")
+    with open(output_file, "w", encoding="utf-8") as f:
         f.writelines(updated_lines)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Dependency Processor for CRCT System")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    # generate-keys
     parser_keys = subparsers.add_parser("generate-keys", help="Generate keys and update tracker")
     parser_keys.add_argument("root_paths", type=str, nargs='+', help="Root directory paths")
     parser_keys.add_argument("--output", type=str, help="Output tracker file")
     parser_keys.add_argument("--tracker_type", type=str, default="mini", choices=["main", "doc", "mini"],
-                        help="Type of tracker ('main', 'doc', or 'mini')")
+                             help="Type of tracker ('main', 'doc', or 'mini')")
 
     # compress
     parser_compress = subparsers.add_parser("compress", help="Compress a string")
@@ -615,8 +612,7 @@ if __name__ == "__main__":
     # suggest-dependencies
     parser_suggest = subparsers.add_parser("suggest-dependencies", help="Suggest dependencies for a tracker")
     parser_suggest.add_argument("--tracker", type=str, required=True, help="Tracker file to analyze")
-    parser_suggest.add_argument("--tracker_type", type=str, required=True,
-                                choices=["main", "doc", "mini"],
+    parser_suggest.add_argument("--tracker_type", type=str, required=True, choices=["main", "doc", "mini"],
                                 help="Type of the tracker file")
 
     # generate-embeddings
@@ -625,15 +621,18 @@ if __name__ == "__main__":
     parser_embed.add_argument("--output", type=str, required=True, help="Output directory for embeddings")
     parser_embed.add_argument("--model", type=str, default="all-MiniLM-L6-v2", help="Name of the Sentence Transformer model")
 
-
     args = parser.parse_args()
 
     if args.command == "generate-keys":
-        key_map, new_keys_added = generate_keys(args.root_paths)
-        if args.output:
-            update_tracker(args.output, key_map, args.tracker_type, sort_keys=new_keys_added)
-        else:
-            print("\n".join(f"{k}: {v}" for k, v in sorted(key_map.items())))
+        try:
+            key_map, new_keys_added = generate_keys(args.root_paths)
+            if args.output:
+                update_tracker(args.output, key_map, args.tracker_type, sort_keys=new_keys_added)
+            else:
+                print("\n".join(f"{k}: {v}" for k, v in sorted(key_map.items())))
+        except FileNotFoundError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
 
     elif args.command == "compress":
         print(compress(args.string))
@@ -648,44 +647,41 @@ if __name__ == "__main__":
             print("Error: Index out of range")
 
     elif args.command == "set_char":
-        if not args.output:
-            print("Error: --output file is required for set_char.")
-            exit(1)
         if not os.path.exists(args.output):
             print(f"Error: File not found: {args.output}")
-            exit(1)
+            sys.exit(1)
         if not isinstance(args.new_char, str) or len(args.new_char) != 1:
             print("Error: new_char must be a single character")
-            exit(1)
+            sys.exit(1)
 
-        with open(args.output, "r") as f:
+        with open(args.output, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
-        GRID_START = "---GRID_START---"
-        GRID_END = "---GRID_END---"
-        LAST_GRID_EDIT = "last_GRID_edit"
+        grid_start = "---GRID_START---"
+        grid_end = "---GRID_END---"
+        last_grid_edit = "last_GRID_edit"
         try:
-            grid_start_index = lines.index(GRID_START + "\n") + 1
-            grid_end_index = lines.index(GRID_END + "\n")
+            grid_start_index = lines.index(grid_start + "\n") + 1
+            grid_end_index = lines.index(grid_end + "\n")
             x_axis_line = lines[grid_start_index]
             x_axis_keys = x_axis_line.strip().split(" ", 1)[1].split()
             num_columns = len(x_axis_keys)
         except ValueError:
-            print("Error: Could not find grid in output file.")
-            exit(1)
+            print("Error: Could not find grid in output file. Re-run 'generate-keys' to initialize the tracker.")
+            sys.exit(1)
 
         try:
             diagonal_index = x_axis_keys.index(args.key)
         except ValueError:
             print(f"Error: Key '{args.key}' not found on X-axis.")
-            exit(1)
+            sys.exit(1)
 
         if args.index == diagonal_index and args.new_char != "o":
             print(f"Error: Attempting to modify the diagonal 'o' character at index {args.index} for key {args.key}.")
-            exit(1)
+            sys.exit(1)
         if args.index != diagonal_index and args.new_char == "o":
             print(f"Error: Attempt to set non-diagonal character to 'o' at index {args.index} for {args.key}")
-            exit(1)
+            sys.exit(1)
 
         current_string = None
         for i in range(grid_start_index + 1, grid_end_index):
@@ -696,54 +692,51 @@ if __name__ == "__main__":
                 break
         else:
             print(f"Error: Row with key '{args.key}' not found.")
-            exit(1)
+            sys.exit(1)
 
         if current_string is None:
             print(f"Error: Could not read current string for key '{args.key}'.")
-            exit(1)
+            sys.exit(1)
 
         new_string = set_char_at(current_string, args.index, args.new_char)
 
         for i in range(grid_start_index + 1, grid_end_index):
-             if lines[i].startswith(f"{args.key} = "):
+            if lines[i].startswith(f"{args.key} = "):
                 if len(decompress(new_string)) != num_columns:
                     print(f"Error: Length mismatch. New string: {len(decompress(new_string))}, expected: {num_columns}")
-                    exit(1)
+                    sys.exit(1)
                 lines[i] = f"{args.key} = {new_string}\n"
                 break
-        # --- Update last_GRID_edit ---
         for i, line in enumerate(lines):
-            if line.startswith(LAST_GRID_EDIT):
-                lines[i] = f"{LAST_GRID_EDIT}: {args.key}\n"
+            if line.startswith(last_grid_edit):
+                lines[i] = f"{last_grid_edit}: {args.key}\n"
                 break
 
-        with open(args.output, "w") as f:
+        with open(args.output, "w", encoding="utf-8") as f:
             f.writelines(lines)
-
 
     elif args.command == "remove-file":
         if not args.output:
             print("Error: --output file is required for remove-file.")
-            exit(1)
+            sys.exit(1)
         try:
             remove_file_from_tracker(args.output, args.file_path)
         except (FileNotFoundError, ValueError) as e:
             print(f"Error: {e}")
-            exit(1)
+            sys.exit(1)
 
     elif args.command == "suggest-dependencies":
         key_map = {}
         if os.path.exists(args.tracker):
-          with open(args.tracker, 'r') as f:
-            lines = f.readlines()
-            existing_key_defs = _read_existing_keys(lines)
-            key_map.update(existing_key_defs) #Load in keys
+            with open(args.tracker, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                existing_key_defs = _read_existing_keys(lines)
+                key_map.update(existing_key_defs)
         else:
-            print("Error: Tracker file not found")
+            print(f"Error: Tracker file '{args.tracker}' not found")
+            sys.exit(1)
         suggestions = suggest_dependencies(args.tracker, args.tracker_type, key_map)
-        # Output suggestions in a clear, machine-readable format (e.g., JSON)
         print(json.dumps(suggestions, indent=4))
-        #Also update the tracker with place holders
         update_tracker(args.tracker, key_map, args.tracker_type, suggestions, sort_keys=False)
 
     elif args.command == "generate-embeddings":
@@ -751,3 +744,5 @@ if __name__ == "__main__":
 
     else:
         parser.print_help()
+
+# Explicit blank line follows
