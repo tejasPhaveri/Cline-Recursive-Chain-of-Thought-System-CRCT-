@@ -322,6 +322,10 @@ def generate_embeddings(root_paths: List[str], output_dir: str, model_name: str 
     metadata = {}
     file_count = 0
 
+    # Define exclusions
+    EXCLUDED_DIRS = {".venv", ".git", "__pycache__"}
+    EXCLUDED_EXTS = {".sqlite3", ".bin", ".pyc", ".pyo", ".pyd"}
+
     if os.path.exists(metadata_file):
         try:
             with open(metadata_file, "r", encoding="utf-8") as f:
@@ -340,6 +344,9 @@ def generate_embeddings(root_paths: List[str], output_dir: str, model_name: str 
 
     for key, path in key_map.items():
         if not os.path.isfile(path):
+            continue
+        # Skip excluded directories and file types
+        if any(excluded in path for excluded in EXCLUDED_DIRS) or os.path.splitext(path)[1] in EXCLUDED_EXTS:
             continue
         try:
             with open(path, "r", encoding="utf-8") as f:
