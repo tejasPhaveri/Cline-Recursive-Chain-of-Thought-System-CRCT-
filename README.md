@@ -1,8 +1,10 @@
-# Cline Recursive Chain-of-Thought System (CRCT) - v7.0
+# Cline Recursive Chain-of-Thought System (CRCT) - v7.2
 
 Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework designed to manage context, dependencies, and tasks in large-scale Cline projects within VS Code. Built for the Cline extension, CRCT leverages a recursive, file-based approach with a modular dependency tracking system to keep your project's state persistent and efficient, even as complexity grows.
 
-This is **v7.0**, a basic but functional release of an ongoing refactor to improve dependency tracking modularity. While the full refactor is still in progress (stay tuned!), this version offers a stable starting point for community testing and feedback. It includes base templates for all core files and the new `dependency_processor.py` script.
+This is **v7.2**, the initial release of the fully modularized dependency system, marking a significant transition from the basic v7.0. This version introduces a more automated design, consolidating operations and enhancing efficiency, and includes base templates for all core files and the `dependency_processor.py` script.
+
+(This README and INSTRUCTIONS.md will be updated to reflect more granular changes over the next few days)
 
 ---
 
@@ -11,11 +13,14 @@ This is **v7.0**, a basic but functional release of an ongoing refactor to impro
 - **Recursive Decomposition**: Breaks tasks into manageable subtasks, organized via directories and files for isolated context management.
 - **Minimal Context Loading**: Loads only essential data, expanding via dependency trackers as needed.
 - **Persistent State**: Uses the VS Code file system to store context, instructions, outputs, and dependencies—kept up-to-date via a **Mandatory Update Protocol (MUP)**.
-- **Modular Dependency Tracking**: 
-  - `dependency_tracker.md` (module-level dependencies)
-  - `doc_tracker.md` (documentation dependencies)
+- **Modular Dependency System**: Fully modularized dependency tracking system.
+- **New Cache System**: Implemented a new caching mechanism for improved performance.
+- **New Batch Processing System**: Introduced a batch processing system for handling large tasks efficiently.
+- **Modular Dependency Tracking**:
   - Mini-trackers (file/function-level within modules)
-  - Uses hierarchical keys and RLE compression for efficiency (~90% fewer characters vs. full names in initial tests).
+  - Uses hierarchical keys and RLE compression for efficiency.
+- **Automated Operations**: System operations are now largely automated and condensed into single commands, streamlining workflows and reducing manual command execution.
+- **New `show-dependencies`command**: The LLM no longer has to manually read and decipher tracker files. This arg will automatically read all trackers for the provided key and return both inbound and outbound dependencies with a full path to each related file. (The LLM still needs to manually replace any placeholder characters 'p', but can now do so with the `add-dependency` command, greatly simplifying the process.)
 - **Phase-Based Workflow**: Operates in distinct phases—**Set-up/Maintenance**, **Strategy**, **Execution**—controlled by `.clinerules`.
 - **Chain-of-Thought Reasoning**: Ensures transparency with step-by-step reasoning and reflection.
 
@@ -49,44 +54,52 @@ This is **v7.0**, a basic but functional release of an ongoing refactor to impro
 ## Project Structure
 
 ```
-cline/
-│   .clinerules              # Controls phase and state
-│   README.md                # This file
-│   requirements.txt         # Python dependencies
+Cline-Recursive-Chain-of-Thought-System-CRCT-/
+│   .clinerules
+│   .gitignore
+│   INSTRUCTIONS.md
+│   LICENSE
+│   README.md
+│   requirements.txt
 │
-├───cline_docs/              # Operational memory
-│   │   activeContext.md     # Current state and priorities
-│   │   changelog.md         # Logs significant changes
-│   │   productContext.md    # Project purpose and user needs
-│   │   progress.md          # Tracks progress
-│   │   projectbrief.md      # Mission and objectives
-│   │   dependency_tracker.md # Module-level dependencies
-│   │   ...                  # Additional templates
-│   └───prompts/             # System prompts and plugins
-│       core_prompt.md       # Core system instructions
-│       setup_maintenance_plugin.md
-│       strategy_plugin.md
-│       execution_plugin.md
+├───cline_docs/                   # Operational memory
+│   │  activeContext.md           # Current state and priorities
+│   │  changelog.md               # Logs significant changes
+│   │  userProfile.md             # User profile and preferences
+│   ├──backups/                   # Backups of tracker files
+│   ├──prompts/                   # System prompts and plugins
+│   │    core_prompt.md           # Core system instructions
+│   │    execution_plugin.md
+│   │    setup_maintenance_plugin.md
+│   │    strategy_plugin.md
+│   ├──templates/                 # Templates for HDTA documents
+│   │    implementation_plan_template.md
+│   │    module_template.md
+│   │    system_manifest_template.md
+│   │    task_template.md
 │
-├───cline_utils/             # Utility scripts
-│   └───dependency_system/
-│       dependency_processor.py # Dependency management script
+├───cline_utils/                  # Utility scripts
+│   └─dependency_system/
+│     │ dependency_processor.py   # Dependency management script
+│     ├──analysis/                # Analysis modules
+│     ├──core/                    # Core modules
+│     ├──io/                      # IO modules
+│     └──utils/                   # Utility modules
 │
-├───docs/                    # Project documentation
-│   │   doc_tracker.md       # Documentation dependencies
-│
-├───src/                     # Source code root
-│
-└───strategy_tasks/          # Strategic plans
+├───docs/                         # Project documentation
+└───src/                          # Source code root
+
 ```
 
 ---
 
 ## Current Status & Future Plans
 
-- **v7.0**: A basic, functional release with modular dependency tracking via `dependency_processor.py`. Includes templates for all `cline_docs/` files.
+- **v7.2**: Initial full release of the modular dependency system, new cache system, and batch processing system. Includes templates for all `cline_docs/` files. This release marks a significant step towards a more automated and efficient system.
 - **Efficiency**: Achieves a ~1.9 efficiency ratio (90% fewer characters) for dependency tracking vs. full names—improving with scale.
-- **Ongoing Refactor**: I’m enhancing modularity and token efficiency further. The next version will refine dependency storage and extend savings to simpler projects.
+- **Savings for Smaller Projects & Dependency Storage**: This version refines dependency storage and extends efficiency savings to smaller projects, making CRCT more versatile.
+- **Automated Design**: System operations are now largely automated, condensing most procedures into single commands like `analyze-project`, streamlining workflows.
+- **Ongoing Development**: Continued development will focus on further refinements and optimizations of the modular system.
 
 Feedback is welcome! Please report bugs or suggestions via GitHub Issues.
 

@@ -15,7 +15,9 @@
 1. **Completion Criteria:**
    - All core files exist and are initialized.
    - `doc_tracker.md` is populated (no 'p' placeholders).
-   - `dependency_tracker.md` is populated (no 'p' placeholders).
+   - `module_relationship_tracker.md` is populated (no 'p' placeholders).
+   - `system_manifest.md` is created.
+   - Templates in `cline_docs/templates/` are used to create the necessary files and instructions.   
    - Mini-trackers are created/populated as needed.
 2. **`.clinerules` Update (MUP):**
    ```
@@ -33,248 +35,157 @@
 **Action**: Ensure all core files exist, creating them if missing as specified.
 
 **Procedure:**
-1. **Check for Existence**: Check if each file (`.clinerules`, `projectbrief.md`, `productContext.md`, `activeContext.md`, `dependency_tracker.md`, `changelog.md`, `doc_tracker.md`) exists.
-2. **Create Missing Files:**
-   - For `.clinerules`, `projectbrief.md`, `productContext.md`, `activeContext.md`, `changelog.md`: Use `write_to_file` to create manually with minimal content (e.g., `# Project Brief\n\n[Describe mission here]` for `projectbrief.md`).
-   - For `dependency_tracker.md`: Run:
+1.  **Check for Existence**: Check if each core file (`.clinerules`, `system_manifest.md`, `activeContext.md`, `module_relationship_tracker.md`, `changelog.md`, `doc_tracker.md`) exists.
+2.  **Create Missing Files:**
+    *   For `.clinerules`, `activeContext.md`, `changelog.md`: Use `write_to_file` to create manually with minimal content.
+    *   For `system_manifest.md`: Use `write_to_file` to create it, then populate it using the template from `cline_docs/templates/system_manifest_template.md`.
+    *   For tracker files (`module_relationship_tracker.md`, `doc_tracker.md`): Run `analyze-project`. This command will create or update the trackers based on project analysis.
      ```
-     python -m cline_utils.dependency_system.dependency_processor generate-keys src tests --output cline_docs/dependency_tracker.md --tracker_type main
+     python -m cline_utils.dependency_system.dependency_processor analyze-project
      ```
-     *Replace `src tests` with the actual code root directories from `[CODE_ROOT_DIRECTORIES]` in `.clinerules`. Replace `cline_docs/` with your `{memory_dir}` if different.*
-   - For `doc_tracker.md`: Run:
-     ```
-     python -m cline_utils.dependency_system.dependency_processor generate-keys docs --output docs/doc_tracker.md --tracker_type doc
-     ```
-     *Replace `docs` with the actual path to your documentation directory. Replace `docs/` with your `{doc_dir}` if different.*
-   - **Important**: Do not manually create or modify tracker files; **always** use `dependency_processor.py` to ensure proper structure and data consistency. Use `generate-keys` for initial setup.
+    *(Mini-trackers in module directories are also created/updated by `analyze-project`)*
+
+   - **Important**: Do not manually create tracker files. **Always** use `analyze-project` for initial setup and subsequent updates to ensure proper structure, key generation, and data consistency.
    - Example Initial `.clinerules`:
      ```
-     ---CLINE_RULES_START---
      [LAST_ACTION_STATE]
      last_action: "System Initialized"
      current_phase: "Set-up/Maintenance"
      next_action: "Initialize Core Files"
      next_phase: "Set-up/Maintenance"
-     [LEARNING_JOURNAL]
-     # Cline Project Learning Journal (.clinerules)
-     # Add entries as insights emerge.
-     ---CLINE_RULES_END---
      ```
 3. **MUP**: Follow Core Prompt MUP after creating files.
 
 ---
 
-## III. Populating `doc_tracker.md` (Documentation Dependency Tracker)
+## III. Analyzing and Verifying Tracker Dependencies
 
-**Objective**: Fully populate `doc_tracker.md` in `{doc_dir}/` with verified dependencies (highest priority). **All tracker modifications MUST be done using the `dependency_processor.py` script.**
+**Objective**: Ensure trackers accurately reflect project dependencies, removing 'p' placeholders. **All tracker modifications MUST use `dependency_processor.py` commands.**
 
 **Procedure:**
-1. **File Existence Check**: Verify `doc_tracker.md` exists in `{doc_dir}/`. If not, create it with:
-   ```
-   python -m cline_utils.dependency_system.dependency_processor generate-keys docs --output docs/doc_tracker.md --tracker_type doc
-   ```
-   *Replace `docs` with your documentation directory path.*
-2. **Generate Embeddings:**
-   ```
-   python -m cline_utils.dependency_system.dependency_processor generate-embeddings docs --output docs --model all-mpnet-base-v2
-   ```
-   *Replace `docs` with your `{doc_dir}` path.*
-3. **Suggest Dependencies:**
-   ```
-   python -m cline_utils.dependency_system.dependency_processor suggest-dependencies --tracker docs/doc_tracker.md --tracker_type doc
-   ```
-   *Note*: Validate suggestions before applying them. The command provides suggestions in JSON format; review and choose the correct dependency character based on documentation relationships. Run this command **once** for initial suggestions.
-4. **Validate and Set Dependencies:**
-   - Review JSON output from `suggest-dependencies`.
-   - Open the relevant files (row and column files from the suggestion).
-   - Confirm the dependency and determine the correct character (`<`, `>`, `x`, `d`, or `n`).
-   - Use `set_char` to set the character in the grid:
-     ```
-     python -m cline_utils.dependency_system.dependency_processor set_char 2 d --output docs/doc_tracker.md --key 1A
-     ```
-     *Replace `2`, `d`, and `1A` with the actual index, character, and row key from your tracker.*
-5. **Iterate and Complete**: Repeat Steps 3-4 until no 'p' placeholders remain in `doc_tracker.md`.
-6. **MUP**: Apply Core MUP and Section VII additions after each `set_char` and upon completion.
+
+1.  **Run Project Analysis (Initial & Updates)**:
+    *   Use `analyze-project` to automatically generate keys, analyze files, suggest dependencies (based on imports and semantic similarity), and update all trackers (`module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers). This should populate the grid, potentially with 'p', 's', 'S', '<', '>', 'x', or 'd' characters.
+    ```bash
+    python -m cline_utils.dependency_system.dependency_processor analyze-project
+    ```
+    *   *(Optional: Add `--force-analysis` or `--force-embeddings` if needed)*.
+    *   **Review logs (`debug.txt`, `suggestions.log`)** for analysis details and suggested changes.
+
+2.  **Review and Verify Placeholders ('p') and Suggestions ('s', 'S')**:
+    *   Read the tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers).
+    *   For each relationship marked with 'p', 's', or 'S':
+        *   Use `show-dependencies --key <key>` to understand the context of related files.
+        *   Examine the source code or documentation of the related files (`read_file`).
+        *   Determine the correct dependency relationship (or confirm 'n' - no dependency). Record the verification of s/S for that key in .clinerules [LEARNING_JOURNAL]. Refer to **IV.1 Dependency Characters**.
+
+3.  **Correct/Confirm Dependencies**:
+    *   If a 'p', 's', or 'S' needs to be changed to a specific relationship ('<', '>', 'x', 'd', 'n'):
+        *   Use `add-dependency` to set the correct character.
+        ```bash
+        # Example: Set dependency between 2Aa and 3Aad in main tracker
+        python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aad --dep-type ">"
+        
+        # Example: Set NO dependency ('n') between 2Aa and 3Aad
+        python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aad --dep-type "n"
+        ```
+    *   If a suggested relationship ('<', '>', 'x', 'd') seems incorrect, use `add-dependency` to set the correct character (e.g., 'n' if there's no dependency, or '<' if the direction is wrong).
+
+4.  **Iterate and Complete**: Repeat steps 2 and 3 until no 'p' placeholders remain in the primary trackers (`module_relationship_tracker.md`, `doc_tracker.md`). Prioritize clearing these before moving to Strategy phase. Mini-tracker verification can continue iteratively.
+
+5.  **MUP**: Apply Core MUP and Section VII additions after each verification/correction session and upon completion of primary tracker verification.
 
 ---
 
-## IV. Populating `dependency_tracker.md` (Module-Level Dependency Tracker)
+## IV. Dependency Tracker Management (Details)
+*(Dependency character definitions are in the Core System Prompt, Section V)*
 
-**Objective**: Fully populate `dependency_tracker.md` in `{memory_dir}/` *after* `doc_tracker.md`. **All tracker modifications MUST be done using the `dependency_processor.py` script.**
-
-**Procedure:**
-1. **File Existence Check**: Verify that `dependency_tracker.md` exists in `{memory_dir}/`. If not, create it with:
-   ```
-   python -m cline_utils.dependency_system.dependency_processor generate-keys src tests --output cline_docs/dependency_tracker.md --tracker_type main
-   ```
-   *Replace `src tests` with paths from `[CODE_ROOT_DIRECTORIES]` in `.clinerules`. Replace `cline_docs/` with your `{memory_dir}` if different.*
-2. **Generate Embeddings:**
-   ```
-   python -m cline_utils.dependency_system.dependency_processor generate-embeddings src tests --output cline_docs --model all-mpnet-base-v2
-   ```
-   *The `--output` path is the parent directory for the `embeddings/` subdirectory.*
-3. **Suggest Dependencies:**
-   ```
-   python -m cline_utils.dependency_system.dependency_processor suggest-dependencies --tracker cline_docs/dependency_tracker.md --tracker_type main
-   ```
-   *Run once for initial suggestions; validate JSON output.*
-4. **Validate and Set Dependencies:**
-   - Review JSON output from `suggest-dependencies`.
-   - Open the relevant files (row and column files).
-   - Confirm the dependency and choose the correct character (`<`, `>`, `x`, `d`, or `n`).
-   - Use `set_char`:
-     ```
-     python -m cline_utils.dependency_system.dependency_processor set_char 3 < --output cline_docs/dependency_tracker.md --key 1B
-     ```
-     *Adjust `3`, `<`, and `1B` based on your tracker data.*
-5. **Iterate and Complete**: Repeat Steps 3-4 until no 'p' placeholders remain.
-6. **MUP**: Apply Core MUP and Section VII additions after each `set_char` and upon completion.
-
----
-
-## V. Dependency Tracker Management (Details)
-
-### V.1 Dependency Characters
-- `<`: Row depends on column.
-- `>`: Column depends on row.
-- `x`: Mutual dependency.
-- `d`: Documentation dependency.
-- `o`: No dependency (diagonal only).
-- `n`: Verified no dependency.
-- `p`: Placeholder (unverified).
-- `s`: Semantic dependency
-
-### V.2 Hierarchical Key System
+### IV.1 Hierarchical Key System
 - **Purpose**: Encodes hierarchy in trackers.
 - **Structure**: Tier (number), Directory (uppercase), Subdirectory (lowercase), File (number).
 - **Examples**: `1A` (top-level dir 'A'), `1A1` (first file in 'A'), `2Ba3` (third file in subdir 'a' of 'B').
 
-### V.3 Grid Format and X-Axis Header
+### IV.3 Grid Format and X-Axis Header
 - **X-Axis Header**: "X " followed by column keys.
 - **Dependency Rows**: Row key, " = ", compressed string (RLE, excluding 'o').
 
-### V.4 Dependency Processor Commands
-Located in `cline_utils/`. **All commands for the dependency system are executed through `dependency_processor.py`.** Every command returns a dictionary in JSON format with `status` and `message` keys.
+### IV.4 Dependency Processor Commands
 
-**Placeholder Definitions:**
-| Placeholder    | Description                                      | Example                           |
-|----------------|--------------------------------------------------|-----------------------------------|
-| `path1`, `path2`| One or more file or directory paths            | `src`, `docs`                     |
-| `tracker_file` | Path to a tracker file (`.md` file)             | `cline_docs/dependency_tracker.md`|
-| `file_path`    | Path to a source code or documentation file     | `src/utils/helpers.py`            |
-| `row_key`      | Key identifying a row in the dependency grid    | `1A2`                             |
-| `index`        | Numerical index of a column in the dependency grid | `5`                           |
-| `character`    | A dependency character (`<`, `>`, `x`, `d`, `n`, `p`, `s`) | `d`                   |
-| `output_file`  | Path to a file for command output               | `docs/doc_tracker.md`             |
-| `output_dir`   | Path to a directory for command output          | `cline_docs/`                     |
+*(Refer to the Core System Prompt, Section VIII, for a more comprehensive list and detailed description of common `dependency_processor.py` commands.)*
 
-1. **`generate-keys`**:
-   ```
-   python -m cline_utils.dependency_system.dependency_processor generate-keys path1 path2 --output output_file --tracker_type main|doc|mini
-   ```
-2. **`compress`**:
-   ```
-   python -m cline_utils.dependency_system.dependency_processor compress string_to_compress
-   ```
-3. **`decompress`**:
-   ```
-   python -m cline_utils.dependency_system.dependency_processor decompress compressed_string
-   ```
-4. **`get_char`**:
-   ```
-   python -m cline_utils.dependency_system.dependency_processor get_char compressed_string index
-   ```
-5. **`set_char`**:
-   ```
-   python -m cline_utils.dependency_system.dependency_processor set_char index character --output output_file --key row_key
-   ```
-6. **`remove-file`**:
-   ```
-   python -m cline_utils.dependency_system.dependency_processor remove-file file_to_remove --output output_file
-   ```
-7. **`suggest-dependencies`**:
-   ```
-   python -m cline_utils.dependency_system.dependency_processor suggest-dependencies --tracker tracker_file --tracker_type main|doc|mini
-   ```
-8. **`generate-embeddings`**:
-   ```
-   python -m cline_utils.dependency_system.dependency_processor generate-embeddings path1 path2 --output output_dir --model model_name
-   ```
 
-### V.5 Mini-Tracker Example
-For `{module_dir}` = "utils":
-1. **Create and Populate:**
-   ```
-   python -m cline_utils.dependency_system.dependency_processor generate-keys utils --output utils/utils_main_instructions.txt --tracker_type mini
-   ```
-2. **Suggest Dependencies:**
-   ```
-   python -m cline_utils.dependency_system.dependency_processor suggest-dependencies --tracker utils/utils_main_instructions.txt --tracker_type mini
-   ```
-3. **Validate and Set:**
-   ```
-   python -m cline_utils.dependency_system.dependency_processor set_char 1 x --output utils/utils_main_instructions.txt --key 1U1
-   ```
-   *Adjust `1`, `x`, and `1U1` based on your tracker data.*
 
-### V.6 Command Sequence Flowchart
+**Key commands for configuration and setup in this phase include:**
+
+-   **`update-config <key_path> <value>`**: Updates a configuration setting in `.clinerules.config.json`.
+    -   *Example*: `python -m cline_utils.dependency_system.dependency_processor update-config thresholds.code_similarity 0.8`
+    -   *Example*: `python -m cline_utils.dependency_system.dependency_processor update-config models.doc_model_name all-MiniLM-L6-v2`
+    -   This command can be used to adjust various settings, including embedding model names (`models.doc_model_name`, `models.code_model_name`), similarity thresholds (`thresholds.doc_similarity`, `thresholds.code_similarity`), and compute device (`compute.embedding_device`).
+
+-   **`reset-config`**: Resets all configuration settings in `.clinerules.config.json` to their default values.
+    -   *Example*: `python -m cline_utils.dependency_system.dependency_processor reset-config`
+
+*Note: For a full list of commands, refer to the Core System Prompt. This plugin focuses on the commands most relevant for setup and maintenance.*
+
+*Key commands used in this phase include `analyze-project`, `show-dependencies`, `add-dependency`, `update-config`, `reset-config`, and `remove-dependency` as detailed in the procedures above.*
+
+### IV.5 Set-up/Maintenance Dependency Workflow
 ```mermaid
 flowchart TD
-A[Generate Keys (One Time)] --> B[Generate Embeddings]
-B --> C[Suggest Dependencies]
-C --> D[Validate Suggestion]
-D --> E[Set Character]
-E --> F{No more 'p' placeholders?}
-F -- No --> C
-F -- Yes --> G[Complete]
+    A[Start Set-up/Maintenance] --> B(Run<br>analyze-project);
+    B --> C{Review Trackers & Logs};
+    C --> D{"Placeholders ('p') or Suggestions ('s'/'S') Found?"};
+    D -- Yes --> E[Identify Relationship];
+    E --> M(check .clinerules for verified s/S key relationships<br>If exists move to next key<br>If not, continue);
+    M -->F("Use<br>show-dependencies --key [key]");
+    F --> G(Read Related Files);
+    G --> H{Determine Correct Character};
+    H --> I(Use<br>add-dependency<br>or<br>remove-dependency);
+    I --> L(Add keys with verified s/S to .clinerules Learning_Journal);
+    L -->C;
+    D -- No --> J[Trackers Verified];
+    J --> K[End Set-up/Maintenance Phase];
+
+    subgraph Verification Loop
+        direction LR
+        E; F; G; H; I; L; M;
+    end
 ```
 
 ---
 
-## VI. Populating Mini-Trackers
+## V. Populating Mini-Trackers
 
 **Objective**: Create and populate mini-trackers in `{module_dir}/{module_dir}_main_instructions.txt`.
 
 **Procedure:**
-1. **Identify Modules**: Use `dependency_tracker.md` directories.
+1. **Identify Modules**: Use `module_relationship_tracker.md` directories.
 2. **Instruction File Check:**
    - If `{module_dir}/{module_dir}_main_instructions.txt` is missing:
      - Create with basic structure (see Core Prompt, Section VII).
-     - Initialize mini-tracker:
-       ```
-       python -m cline_utils.dependency_system.dependency_processor generate-keys utils --output utils/utils_main_instructions.txt --tracker_type mini
-       ```
-       *Replace `utils` with the actual module directory.*
+     - Initialize mini-tracker:       
    - If it exists, proceed to Step 3.
-3. **Generate Embeddings (if applicable):**
-   ```
-   python -m cline_utils.dependency_system.dependency_processor generate-embeddings utils --output utils --model all-mpnet-base-v2
-   ```
-   *Replace `utils` with the actual module directory.*
-4. **Suggest and Validate**: See **Section V.5** for example commands. Adapt `--tracker` and keys accordingly.
+3. **Suggest and Validate**: See **Section IV.5** for example commands. Adapt `--tracker` and keys accordingly.
 5. **Iterate and Complete**: Repeat until populated.
-6. **MUP**: Apply Core MUP and Section VII additions.
+6. **MUP**: Apply Core MUP and Section VI additions.
 
 ---
 
-## VII. Set-up/Maintenance Plugin - MUP Additions
+## VI. Set-up/Maintenance Plugin - MUP Additions
 
 After Core MUP steps:
-1. **Update `dependency_tracker.md`**: Save changes from commands.
-2. **Update `doc_tracker.md`**: Save changes.
-3. **Update Mini-Trackers**: Save changes.
-4. **Update `.clinerules` [LAST_ACTION_STATE]:**
+1. **Update `system_manifest.md`**: Ensure it's initialized using the template.
+2. **Update `module_relationship_tracker.md`**: Save changes from commands.
+3. **Update `doc_tracker.md`**: Save changes.
+4. **Update Mini-Trackers**: Save changes.
+5. **Update `.clinerules` [LAST_ACTION_STATE]:**
 
     - Example after `doc_tracker.md`:
 
     ```
-    ---CLINE_RULES_START---
     [LAST_ACTION_STATE]
     last_action: "Populated doc_tracker.md"
     current_phase: "Set-up/Maintenance"
-    next_action: "Populate dependency_tracker.md"
+    next_action: "Populate module_relationship_tracker.md"
     next_phase: "Set-up/Maintenance"
-    [LEARNING_JOURNAL]
-    # Populate this with any insights you learn about the user or project.
-    ---CLINE_RULES_END---
     ```

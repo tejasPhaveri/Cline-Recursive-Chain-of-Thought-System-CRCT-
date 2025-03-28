@@ -13,7 +13,7 @@
 
 **Exiting Strategy Phase:**
 1. **Completion Criteria:**
-   - Instruction files for prioritized tasks are created with objectives, context, dependencies, and steps.
+   - Domain Module and Task Instruction documents for prioritized tasks are created, with objectives, context, and steps defined.
    - Tasks are prioritized and ready for execution.
    - Strategy objectives for the cycle are met.
 2. **`.clinerules` Update (MUP):**
@@ -31,65 +31,50 @@
 
 **Action**: Load context to guide strategy.
 **Procedure:**
-- Load core files: `.clinerules`, `projectbrief.md`, `productContext.md`, `activeContext.md`, `dependency_tracker.md`, `changelog.md`, `doc_tracker.md`.
+- Load core files: `.clinerules`, `system_manifest.md`, `activeContext.md`.
+- Review `system_manifest.md` for system overview and component relationships.
 - Review `activeContext.md` for current state, decisions, and priorities.
-- Check `dependency_tracker.md` and `doc_tracker.md` for module and documentation dependencies.
-- Revisit `projectbrief.md` and `productContext.md` to align with project scope and purpose.
-- Examine `.clinerules` [LEARNING_JOURNAL] for past insights influencing strategy.
+- Check `module_relationship_tracker.md` and `doc_tracker.md` for module and documentation dependencies.
 
 ---
 
-## III. Creating New Task Instruction Files
+## III. Creating New HDTA Documents
 
-**Action**: Create `*_instructions.txt` files for tasks/subtasks.
+**Action**: Create *Domain Module* (`{module_name}_module.md`), *Implementation Plans* (`implementation_plan_{filename}.md`) and *Task Instruction* (`{task_name}.md`) documents as needed, ensuring no unnecessary overwrites.
+
 **Procedure:**
-1. **Identify Task/Subtask**: Use `projectbrief.md`, `productContext.md`, `activeContext.md`, and project state to select tasks, such as:
-   - Breaking down `projectbrief.md` objectives.
-   - Addressing `activeContext.md` priorities.
-   - Targeting `dependency_tracker.md` modules.
-2. **Choose Task Name and Location:**
-   - **Task**: Create `{task_name}_instructions.txt` in a new directory if needed (e.g., `strategy_tasks/`).
-   - **Subtask**: Place `{subtask_name}_instructions.txt` in a parent task subdirectory.
-   - **Module-Level**: Use or create `{module_dir}/{module_dir}_main_instructions.txt` (see Set-up/Maintenance Plugin, Section VI).
-3. **Populate Instruction File Sections:**
-   - Set title: `# {Task Name} Instructions`.
-   - Define objective: Clearly state purpose and goals.
-   - Provide context: Include background and constraints, referencing files.
-   - List dependencies: Use hierarchical keys from `dependency_tracker.md`, `doc_tracker.md`, and mini-trackers.
-   - Outline steps: Break into actionable increments.
-   - Specify output: Describe deliverables.
-   - Add notes: Note challenges or considerations.
-   - Include mini-tracker (module files only): Add placeholder using `generate-keys`:
-     ```
-     python -m cline_utils.dependency_system.dependency_processor generate-keys utils --output utils/utils_main_instructions.txt --tracker_type mini
-     ```
-     *Replace `utils` with the actual module directory from `[CODE_ROOT_DIRECTORIES]` in `.clinerules`.*
-   - Example Instruction File:
-     ```
-     # DataProcessing Instructions
 
-     ## Objective
-     Process raw data into a structured format.
+1.  **Determine Document Tier:** Based on the task, decide which documents to create.
+    *   **Domain Module:**  For defining new major functional areas or significantly modifying existing ones.
+    *   **Implementation Plan** High level file plans.
+    *   **Task Instruction:**  For specific, actionable tasks within an Implementation plan.
 
-     ## Context
-     Uses data from `raw_data.csv` in `data/`.
+2.  **Choose Document Name and Location:**
+    *   **Domain Module:** `{module_name}_module.md` in the appropriate directory (you may need to create a directory for the module).
+    *   **Implementation Plan:** `implementation_plan_{filename}.md` in the appropriate directory.
+    *   **Task Instruction:** `{task_name}.md` in the appropriate directory.
 
-     ## Dependencies
-     - 1A1 (`data/raw_data.csv`)
-     - 1B (`utils/data_utils.py`)
+3.  **Pre-Action Verification:**
+    *   Check if the intended file already exists.
+    *   Generate Chain-of-Thought:
+        *   If exists: "File `{file_name}.md` exists. Reviewing contents to confirm sufficiency."
+        *   If not: "File `{file_name}.md` does not exist. Proceeding to create."
+    *   Decide:
+        *   Exists and sufficient: Skip creation.
+        *   Exists but outdated: Update file.
+        *   Does not exist: Create new file.
 
-     ## Steps
-     1. Read `raw_data.csv` using `data_utils.py`.
-     2. Clean data (remove nulls).
-     3. Write to `processed_data.csv`.
+4.  **Populate Document Using Template:**
+    *   Use the appropriate template from `cline_docs/templates/`.
+    *   Fill in all sections of the template.
 
-     ## Expected Output
-     - `data/processed_data.csv`
+5.  **Manual Dependency Linking (CRITICAL):**
+    *   **Domain Module:**  Add a link to the new Module in the `system_manifest.md` "Component Registry" section.
+    *   **Implementation Plan** Add a link to the appropriate files.
+    *   **Task Instruction:** Add a link to the appropriate files' "Tasks" section (or similar).
+    * **YOU MUST MANUALLY MAINTAIN THESE LINKS.**
 
-     ## Notes
-     - Handle large files carefully.
-     ```
-4. **MUP**: Follow Core MUP and Section V additions after creating files.
+6.  **MUP**: Follow Core MUP and Section V additions after creating/updating files.
 
 ---
 
@@ -98,8 +83,8 @@
 **Action**: Determine task/subtask priority and order.
 **Procedure:**
 1. **Review Existing Tasks**: Check incomplete instruction files in module or task directories.
-2. **Assess Dependencies**: Use `dependency_tracker.md`, `doc_tracker.md`, and mini-trackers to prioritize prerequisite tasks.
-3. **Consider Project Goals**: Align with `projectbrief.md` objectives, prioritizing key contributions.
+2. **Assess Dependencies**: Use `module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers along with any other dependency information to prioritize prerequisite tasks and Domain Components.
+3. **Consider Project Goals**: Align with `system_manifest.md` objectives, prioritizing key contributions.
 4. **Review `activeContext.md`**: Factor in recent priorities, issues, or feedback.
 5. **Update `activeContext.md`**: Record priorities and reasoning.
 
@@ -120,32 +105,33 @@ G --> H[End]
 ## V. Strategy Plugin - Mandatory Update Protocol (MUP) Additions
 
 After Core MUP steps:
-1. **Update Instruction Files**: Save new or modified instruction files.
-2. **Update `activeContext.md` with Strategy Outcomes:**
+1. **Update HDTA Documents**: Save new or modified documents.
+2. **Update `system_manifest.md`**: Ensure links to new Components are added.
+3. **Update Relevant Domain Modules**: Ensure links to new Instructions are added.
+4. **Update `activeContext.md` with Strategy Outcomes:**
    - Summarize planned tasks.
    - List new instruction file locations and names.
    - Document priorities and reasoning (from Section IV).
-3. **Update `.clinerules` [LAST_ACTION_STATE]:**
+5. **Update `.clinerules` [LAST_ACTION_STATE]:**
    ```
-   ---CLINE_RULES_START---
    [LAST_ACTION_STATE]
    last_action: "Completed Strategy Phase - Tasks Planned"
    current_phase: "Strategy"
    next_action: "Phase Complete - User Action Required"
    next_phase: "Execution"
-   [LEARNING_JOURNAL]
-   # Planned tasks on March 08, 2025: DataProcessing, ModelTraining.
-   ---CLINE_RULES_END---
    ```
 
 ---
 
 ## VI. Quick Reference
 - **Actions:**
-  - Create instruction files: Define tasks/subtasks.
+  - Create HDTA documents: Define modules, implementation plans, and tasks/subtasks.
   - Prioritize tasks: Assess dependencies and goals.
+  - *Manually* link documents: Maintain the HDTA hierarchy.
 - **Files:**
-  - `projectbrief.md`: Guides objectives.
+  - `system_manifest.md`: Guides objectives.
   - `activeContext.md`: Tracks state and priorities.
-  - `dependency_tracker.md`: Lists dependencies.
-- **MUP Additions:** Update instruction files, `activeContext.md`, and `.clinerules`.
+  - `module_relationship_tracker.md`: Lists dependencies.
+  - Domain Module documents: Describe functional areas.
+  - Task Instruction documents: Outline specific tasks.
+- **MUP Additions:** Update HDTA documents, `system_manifest.md`, `activeContext.md`, and `.clinerules`.

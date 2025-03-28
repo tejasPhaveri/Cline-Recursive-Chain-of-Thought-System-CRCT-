@@ -18,12 +18,12 @@
    - Results and observations are documented.
    - MUP is followed for all actions.
 2. **`.clinerules` Update (MUP):**
-   - To return to Strategy:
+   - To return to Set-up/Maintenance for verification:
      ```
      last_action: "Completed Execution Phase - Tasks Executed"
      current_phase: "Execution"
      next_action: "Phase Complete - User Action Required"
-     next_phase: "Strategy"
+     next_phase: "Set-up/Maintenance"
      ```
    - For project completion:
      ```
@@ -41,11 +41,15 @@
 
 **Action**: Load context for task execution.
 **Procedure:**
-- Load core files: `.clinerules`, `projectbrief.md`, `productContext.md`, `activeContext.md`, `dependency_tracker.md`, `changelog.md`, `doc_tracker.md`.
-- Review `activeContext.md` for project state and priorities.
-- Check trackers (`dependency_tracker.md`, `doc_tracker.md`, mini-trackers) for dependencies.
-- Load instruction file (`{task_name}_instructions.txt` or `{module_dir}/{module_dir}_main_instructions.txt`), focusing on "Objective," "Context," "Dependencies," and "Steps".
-- Load dependency files using hierarchical keys from trackers.
+- Load the applicable `implementation_plan_{filename}.md`
+- Load current Task (`{task_name}.md`)
+- Check dependencies for relevant files/modules using `show-dependencies --key <key>`. This command searches all trackers automatically.
+  ```bash
+  # Example: Check dependencies for file represented by key 1A1
+  python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 1A1
+  ```
+- Load Tasks/SubTasks listed as dependencies in the Implementation Plan or identified via `show-dependencies`.
+- Load dependency files identified via `show-dependencies` using `read_file`.
 
 ---
 
@@ -102,35 +106,27 @@ J -- No --> K[End]
 ## IV. Execution Plugin - MUP Additions
 
 After Core MUP steps:
-1. **Update Instruction File**: Save modifications (e.g., notes), avoiding major "Steps" changes unless critical.
-2. **Update Mini-Trackers**: Reflect new dependencies with `suggest-dependencies` and `set_char`:
-   - Example:
+1. **Update Instruction File**: Save modifications (e.g., notes), avoiding major "Steps" changes unless critical. Update completion status.
+2. **Update Mini-Trackers**: If execution created a new dependency within a module, reflect it in the corresponding `{module_name}_module.md` mini-tracker using `add-dependency`:
+   - Example (adding dependency from function/file 2Ca1 to 2Ca3 within module 'C'):
+     ```bash
+     python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker path/to/module_C/module_C_module.md --source-key 2Ca1 --target-key 2Ca3 --dep-type ">"
      ```
-     python -m cline_utils.dependency_system.dependency_processor suggest-dependencies --tracker utils/utils_main_instructions.txt --tracker_type mini
-     ```
-     ```
-     python -m cline_utils.dependency_system.dependency_processor set_char 1 x --output utils/utils_main_instructions.txt --key 1U1
-     ```
-     *Adjust paths, `1`, `x`, and `1U1` based on your tracker data.*
-3. **Update `.clinerules` [LAST_ACTION_STATE]:**
+3. **Update Domain Module Documents:** If the task execution introduces new dependencies or modifies existing ones, update the relevant Domain document.     
+4. **Update `.clinerules` [LAST_ACTION_STATE]:**
    - After a step:
      ```
-     last_action: "Completed Step 1 in DataProcessing_instructions.txt"
+     last_action: "Completed Step 1 in {task_name}.md"
      current_phase: "Execution"
      next_action: "Execute Step 2"
      next_phase: "Execution"
      ```
    - After all steps:
      ```
-     ---CLINE_RULES_START---
-     [LAST_ACTION_STATE]
-     last_action: "Completed all steps in DataProcessing_instructions.txt"
+     last_action: "Completed all steps in {task_name}.md"
      current_phase: "Execution"
      next_action: "Phase Complete - User Action Required"
-     next_phase: "Strategy"
-     [LEARNING_JOURNAL]
-     # Executed data processing task on March 08, 2025.
-     ---CLINE_RULES_END---
+     next_phase: "Set-up/Maintenance"
      ```
 
 ---
@@ -143,16 +139,31 @@ After Core MUP steps:
   - Instruction files: Contain execution steps.
   - `activeContext.md`: Tracks execution state.
   - Mini-trackers: Reflect new dependencies.
-- **MUP Additions:** Update instruction files, mini-trackers, and `.clinerules`.
+- **MUP Additions:** Update instruction files, trackers, Module documents, and `.clinerules`.
 
 ---
 
 ## VI. Error Handling and Performance Optimization
 
-### VI.1 Error Handling
-When encountering errors with dependency tracking commands:
-1. **File not found errors**: Verify paths exist. For `generate-keys` or `remove-file`, check `root_paths` or `file_path`.
-2. **Grid validation errors**: Verify the tracker structure. Use `generate-keys` to re-initialize if corrupted, or `remove-file` and `suggest-dependencies`/`set_char` to correct entries. Ensure keys in `set_char` exist in the tracker.
-3. **Embedding errors**: For `suggest-dependencies` with `doc` type, ensure `generate-embeddings` has run to create `metadata.json`. For `generate-embeddings`, install `sentence_transformers` if the model fails to load.
+### VI.1 Dependency Command Error Handling
+When encountering errors with `dependency_processor.py` commands:
+1.  **Check Logs**: Always review `debug.txt` and `suggestions.log` first for detailed error messages and context.
+2.  **`analyze-project` Errors**:
+    *   **File Not Found**: Ensure the project structure is correct and paths in `.clinerules.config.json` (especially `code_root_dirs`, `doc_dir`) are valid relative to the project root where the command is run.
+    *   **Embedding Errors**: May indicate issues with installing `sentence-transformers` or accessing model files. Check environment setup. Consider running with `--force-embeddings` if caches might be corrupt.
+    *   **Permission Errors**: Check file/directory permissions.
+3.  **`show-dependencies` Errors**:
+    *   **Key Not Found**: The specified key might not exist in any tracker. Verify the key is correct. Run `analyze-project` if the file/key should exist but isn't in the trackers.
+4.  **`add-dependency` Errors**:
+    *   **Tracker Not Found**: Verify the `--tracker` path is correct.
+    *   **Key Not Found**: Ensure `--source-key` and `--target-key` exist in the specified tracker. Run `analyze-project` if needed.
+    *   **Grid Errors**: If the tracker file is corrupted, running `analyze-project` might fix it by regenerating keys and structure. If not, manual inspection or restoring from backup (`cline_docs/backups/`) might be needed.
+5.  **`remove-file` Errors**:
+    *   **Tracker/File Not Found**: Verify paths are correct.
+    *   **Grid Errors**: Similar to `add-dependency`, try `analyze-project`.
+6.  **General Tips**:
+    *   Use `clear-caches` if you suspect outdated cache data is causing issues.
+    *   Ensure you are running commands from the project root directory.
+    *   Verify Python environment has necessary packages (`requirements.txt`).
 
-*Replace `src tests` with paths from `[CODE_ROOT_DIRECTORIES]` in `.clinerules`. Replace `cline_docs` with your `{memory_dir}` if different.*
+*(Paths like `cline_docs`, `src`, etc., are based on configuration in `.clinerules.config.json`)*

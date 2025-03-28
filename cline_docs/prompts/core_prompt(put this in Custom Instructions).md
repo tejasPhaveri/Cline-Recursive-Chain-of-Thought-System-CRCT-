@@ -11,15 +11,10 @@ This outlines the fundamental principles, required files, workflow structure, an
 **At initialization the LLM MUST perform the following steps, IN THIS ORDER:**
 
 1. **Read `.clinerules`**
-
 2. **Load Plugin** for `current_phase` from `cline_docs/prompts/`.
-
 **YOU MUST LOAD THE PLUGIN INSTRUCTIONS. DO NOT PROCEED WITHOUT DOING SO.**
-
 3. **Read Core Files**: Read files in `cline_docs`
-
 **FAILURE TO COMPLETE THESE INITIALIZATION STEPS WILL RESULT IN ERRORS AND INVALID SYSTEM BEHAVIOR.**
-
 4. Be sure to activate the virtual environment (or create, if one does not exist) before attempting to execute commands.
 
 ---
@@ -27,13 +22,14 @@ This outlines the fundamental principles, required files, workflow structure, an
 ## I. Core Principles
 
 - **Recursive Decomposition**: Recursively break tasks into small, manageable subtasks, organized hierarchically via directories and files.
-- **Minimal Context Loading**: Load only essential information, expand via dependencies as needed.
+- **Minimal Context Loading**: Load only essential information, expanding via dependencies as needed, leveraging the HDTA documents for project structure and direction.
 - **Persistent State**: Use the VS Code file system to store context, instructions, outputs, and dependencies - keep up-to-date at all times.
-- **Explicit Dependency Tracking**: Maintain comprehensive dependency records in `dependency_tracker.md`, `doc_tracker.md`, and mini-trackers.
+- **Explicit Dependency Tracking**: Maintain comprehensive dependency records in `module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers.
 - **Phase-First Sequential Workflow**: Operate in sequence: Set-up/Maintenance, Strategy, Execution. Begin by reading `.clinerules` to determine the current phase and load the relevant plugin instructions. Complete Set-up/Maintenance before proceeding.
 - **Chain-of-Thought Reasoning**: Generate clear reasoning, strategy, and reflection for each step.
 - **Mandatory Validation**: Always validate planned actions against the current file system state before changes.
 - **Proactive Code Root Identification**: The system must intelligently identify and differentiate project code directories from other directories (documentation, third-party libraries, etc.). This is done during **Set-up/Maintenance**. Identified code root directories are stored in `.clinerules`.
+- **Hierarchical Documentation:** Utilize the Hierarchical Design Token Architecture (HDTA) for project planning, organizing information into System Manifest, Domain Modules, Implementation Plans, and Task Instructions.
 
 ---
 
@@ -44,24 +40,21 @@ These files form the project foundation. *Must be loaded at initialization.* If 
 | File                  | Purpose                                                    | Location       | Creation Method if Missing                                                                                                                    |
 |-----------------------|------------------------------------------------------------|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
 | `.clinerules`         | Tracks phase, last action, project intelligence, and code root directories | Project root   | Create manually with minimal content (see example below)                                                                                      |
-| `projectbrief.md`     | Defines project mission, objectives, constraints           | `{memory_dir}/`| Create manually with placeholder (e.g., `# Project Brief`)                                                                                    |
-| `productContext.md`   | Explains project purpose and user needs                    | `{memory_dir}/`| Create manually with placeholder (e.g., `# Product Context`)                                                                                  |
+| `system_manifest.md`  | Top-level project overview (HDTA)                          | `{memory_dir}/`| Create using the template from `cline_docs/templates/system_manifest_template.md`                                                           |
 | `activeContext.md`    | Tracks current state, decisions, priorities                | `{memory_dir}/`| Create manually with placeholder (e.g., `# Active Context`)                                                                                   |
-| `dependency_tracker.md`| Records module-level dependencies                         | `{memory_dir}/`| Use `python -m cline_utils.dependency_system.dependency_processor generate-keys src tests --output {memory_dir}/dependency_tracker.md --tracker_type main` |
+| `module_relationship_tracker.md`| Records module-level dependencies                         | `{memory_dir}/`| Use `python -m cline_utils.dependency_system.dependency_processor analyze-project` |
 | `changelog.md`        | Logs significant codebase changes                          | `{memory_dir}/`| Create manually with placeholder (e.g., `# Changelog`)                                                                                        |
-| `doc_tracker.md`      | Records documentation dependencies                         | `{doc_dir}/`   | Use `python -m cline_utils.dependency_system.dependency_processor generate-keys docs --output {doc_dir}/doc_tracker.md --tracker_type doc`      |
+| `doc_tracker.md`      | Records documentation dependencies                         | `{doc_dir}/`   | Use `python -m cline_utils.dependency_system.dependency_processor analyze-project` |
 
 *Notes*:
 - `{memory_dir}` (e.g., `cline_docs/`) is for operational memory; `{doc_dir}` (e.g., `docs/`) is for project documentation. A "module" is a top-level directory within the project code root(s).
-- **For tracker files (`dependency_tracker.md`, `doc_tracker.md`, mini-trackers), do *not* create or modify manually. Always use the `dependency_processor.py` script as specified to ensure correct format and data consistency.**
+- **For tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers), do *not* create or modify manually. Always use the `dependency_processor.py` script as specified to ensure correct format and data consistency.**
 - For other files, create manually with minimal content if needed (e.g., a title or basic structure).
 - Replace `src tests` and `docs` with actual paths from `[CODE_ROOT_DIRECTORIES]` in `.clinerules` or your documentation directory, respectively.
-- `progress.md` in `{memory_dir}` must also be read and kept up to date.
 
 **`.clinerules` File Format (Example):**
 
 ```
----CLINE_RULES_START---
 [LAST_ACTION_STATE]
 last_action: "System Initialized"
 current_phase: "Set-up/Maintenance"
@@ -73,10 +66,12 @@ next_phase: "Set-up/Maintenance"
 - tests
 - utils
 
+[DOC_DIRECTORIES]
+- docs
+
 [LEARNING_JOURNAL]
-- Initial setup completed on March 08, 2025.
-- Identified code roots: src, tests, utils.
----CLINE_RULES_END---
+- Regularly updating {memory_dir} and any instruction files help me to remember what I have done and what still needs to be done so I don't lose track.
+- 
 ```
 
 ---
@@ -97,7 +92,7 @@ Proceed through the recursive loop, starting with the phase indicated by `.cline
 
 ### Phase Transition Checklist
 Before switching phases:
-- **Set-up/Maintenance → Strategy**: Confirm `doc_tracker.md` and `dependency_tracker.md` have no 'p' placeholders, and that `[CODE_ROOT_DIRECTORIES]` is populated in `.clinerules`.
+- **Set-up/Maintenance → Strategy**: Confirm `doc_tracker.md` and `module_relationship_tracker.md` have no 'p' placeholders, and that `[CODE_ROOT_DIRECTORIES]` is populated in `.clinerules`.
 - **Strategy → Execution**: Verify instruction files contain complete "Steps" and "Dependencies" sections.
 
 Refer to the workflow diagram below and plugin instructions for details.
@@ -109,7 +104,7 @@ Refer to the workflow diagram below and plugin instructions for details.
 ```mermaid
 flowchart TD
     A[Start: Load High-Level Context]
-    A1[Load projectbrief.md, productContext.md, activeContext.md, .clinerules]
+    A1[Load system_manifest.md, activeContext.md, .clinerules]
     B[Enter Recursive Chain-of-Thought Loop]
     B1[High-Level System Verification]
     C[Load/Create Instructions]
@@ -150,10 +145,10 @@ flowchart TD
     N --> B
     subgraph Dependency_Management [Dependency Management]
         D1[Start: Task Initiation]
-        D2[Check dependency_tracker.md]
+        D2[Check module_relationship_tracker.md]
         D3{Dependencies Met?}
         D4[Execute Task]
-        D5[Update dependency_tracker.md]
+        D5[Update module_relationship_tracker.md]
         D7[Load Required Context]
         D8[Complete Prerequisite Tasks]
         D1 --> D2
@@ -174,29 +169,25 @@ flowchart TD
 
 ## V. Dependency Tracker Management (Overview)
 
-`dependency_tracker.md`, `doc_tracker.md`, and mini-trackers are critical. Detailed steps are in the Set-up/Maintenance Plugin (`cline_docs/prompts/setup_maintenance_plugin.md`). **All tracker management MUST be done using the `dependency_processor.py` script.**
+`module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers are critical. Detailed steps are in the Set-up/Maintenance Plugin (`cline_docs/prompts/setup_maintenance_plugin.md`). **All tracker management MUST be done using the `dependency_processor.py` script.**
 
 **Tracker Overview Table:**
+
 | Tracker                | Scope                                      | Granularity           | Location                                  | Priority (Set-up/Maintenance) |
 |-----------------------|--------------------------------------------|-----------------------|-------------------------------------------|------------------------------|
-| `doc_tracker.md`      | `{doc_dir}/` file dependencies            | Doc-to-doc            | `{doc_dir}/`                              | Highest                      |
-| `dependency_tracker.md`| Module-level dependencies                | Module-to-module      | `{memory_dir}/`                           | High                         |
-| Mini-Trackers         | Within-module file/function/doc dependencies | File/function/doc-level | `{module_dir}/{module_dir}_main_instructions.txt` | Low                     |
+| `doc_tracker.md`      | `{doc_dir}/` file dependencies            | Doc-to-doc            | `{memory_dir}/`                              | Highest                      |
+| `module_relationship_tracker.md`| Module-level dependencies                | Module-to-module      | `{memory_dir}/`                           | High                         |
+| Mini-Trackers         | Within-module file/function/doc dependencies | File/function/doc-level | `{module_name}_module.md` | Low                     |
 
 **Dependency Characters:**
 - `<`: Row depends on column.
 - `>`: Column depends on row.
 - `x`: Mutual dependency.
 - `d`: Documentation dependency.
-- `o`: No dependency (diagonal only).
+- `o`: Self dependency (diagonal only).
 - `n`: Verified no dependency.
 - `p`: Placeholder (unverified).
 - `s`: Semantic dependency
-
-**Command Example:**
-```
-python -m cline_utils.dependency_system.dependency_processor get_char "pn5d2n" 3
-```
 
 ---
 
@@ -207,43 +198,10 @@ The MUP must be followed immediately after any state-changing action:
 2. **Update `changelog.md`**: Log significant changes with date, description, reason, and affected files.
 3. **Update `.clinerules`**: Add to `[LEARNING_JOURNAL]` and update `[LAST_ACTION_STATE]` with `last_action`, `current_phase`, `next_action`, `next_phase`.
 4. **Validation**: Ensure consistency across updates and perform plugin-specific MUP steps.
-
+5. **Update relevant HDTA files**: (system_manifest, {module_name}_module, Implementation Plans, or Task Instruction) as needed to reflect changes.
 ---
 
-## VII. Instruction File Format
-
-Instruction files (`{task_name}_instructions.txt` or `{module_dir}/{module_dir}_main_instructions.txt`):
-
-```
-# {Task Name} Instructions
-
-## Objective
-{Clear, concise statement of purpose and goals}
-
-## Context
-{Background, constraints, context}
-
-## Dependencies
-{List of files, modules, or tasks}
-
-## Steps
-1. {Step 1}
-2. {Step 2}
-...
-
-## Expected Output
-{Description of deliverables}
-
-## Notes
-{Additional considerations}
-
-## Mini Dependency Tracker
-{Mini-tracker for file-level dependencies}
-```
-
----
-
-## VIII. Command Execution Guidelines
+## VII. Command Execution Guidelines
 
 1. **Pre-Action Verification**: Verify file system state before changes.
 2. **Incremental Execution**: Execute step-by-step, documenting results.
@@ -253,76 +211,51 @@ Instruction files (`{task_name}_instructions.txt` or `{module_dir}/{module_dir}_
 
 ---
 
-## IX. Dependency Processor Command Overview
+## VIII. Dependency Processor Command Overview
 
-Located in `cline_utils/`. **All commands are executed through `dependency_processor.py`.** Every command returns a dictionary with at least `status` and `message` keys unless otherwise noted.
+Located in `cline_utils/`. **All commands are executed via `python -m cline_utils.dependency_system.dependency_processor <command> [args...]`.** Most commands return a status message upon completion.
 
-**See setup_maintenance_plugin.md for a full list of args and example use**
+**Core Commands for CRCT Workflow:**
 
-1. **`generate-keys`**: Initializes a tracker and adds all files/folders within the given root paths. Use this *once* per tracker to set up the initial structure.
-   ```
-   python -m cline_utils.dependency_system.dependency_processor generate-keys path1 path2 --output output_file --tracker_type main|doc|mini
-   ```
-   *Example: `python -m cline_utils.dependency_system.dependency_processor generate-keys src tests --output cline_docs/dependency_tracker.md --tracker_type main`*
-   *Error Note: Fails if paths don't exist; check paths before running.*
+1.  **`analyze-project [<project_root>] [--output <json_path>] [--force-embeddings] [--force-analysis]`**:
+    *   **Purpose**: The primary command for maintaining trackers. Analyzes the project (default: current directory), updates/generates keys, creates/updates tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers), generates embeddings, and suggests dependencies. Run this during Set-up/Maintenance and after significant code changes.
+    *   **Example**: `python -m cline_utils.dependency_system.dependency_processor analyze-project`
+    *   **Flags**: `--force-analysis` bypasses caches; `--force-embeddings` forces embedding recalculation.
 
-2. **`compress`**: Compresses a string using run-length encoding (RLE).
-   ```
-   python -m cline_utils.dependency_system.dependency_processor compress string_to_compress
-   ```
-   *Example: `python -m cline_utils.dependency_system.dependency_processor compress "nnnnnpppdd"`*
+2.  **`show-dependencies --key <key>`**:
+    *   **Purpose**: Displays all known outgoing and incoming dependencies (with paths) for a specific `<key>` by searching across *all* tracker files (main, doc, mini). Essential for understanding context before modifying a file.
+    *   **Example**: `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
 
-3. **`decompress`**: Decompresses a string that was compressed using RLE.
-   ```
-   python -m cline_utils.dependency_system.dependency_processor decompress compressed_string
-   ```
-   *Example: `python -m cline_utils.dependency_system.dependency_processor decompress "n5p3d2"`*
+3.  **`add-dependency --tracker <tracker_file> --source-key <key> --target-key <key> [--dep-type <char>]`**:
+    *   **Purpose**: Manually sets a specific dependency relationship character ('<', '>', 'x', 'd', 's', 'S', 'n', 'p') between two keys in the specified `<tracker_file>`. Use this to correct suggestions from `analyze-project` or to explicitly mark verified relationships (including 'n' for no dependency).
+    *   **Example (Set dependency)**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd --dep-type ">"`
+    *   **Example (Set NO dependency)**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd --dep-type "n"`
 
-4. **`get_char`**: Gets the character at a specific index in a compressed string.
-   ```
-   python -m cline_utils.dependency_system.dependency_processor get_char compressed_string index
-   ```
-   *Example: `python -m cline_utils.dependency_system.dependency_processor get_char "n5p3d2" 7`*
+4.  **`remove-file <tracker_file> <file>`**:
+    *   **Purpose**: Removes a file's key, row, and column entirely from the specified `<tracker_file>`. Use when deleting or refactoring files out of existence.
+    *   **Example**: `python -m cline_utils.dependency_system.dependency_processor remove-file cline_docs/module_relationship_tracker.md src/utils/old_util.py`
 
-5. **`set_char`**: Sets a character at a specific index in a compressed string and updates the tracker file.
-   ```
-   python -m cline_utils.dependency_system.dependency_processor set_char index new_char --output output_file --key row_key
-   ```
-   *Example: `python -m cline_utils.dependency_system.dependency_processor set_char 2 x --output docs/doc_tracker.md --key 1A`*
-   *Error Note: Fails if grid is malformed; re-run `generate-keys` to fix.*
+**Utility Commands:**
 
-6. **`remove-file`**: Removes a file from the tracker.
-   ```
-   python -m cline_utils.dependency_system.dependency_processor remove-file file_to_remove --output output_file
-   ```
-   *Example: `python -m cline_utils.dependency_system.dependency_processor remove-file src/utils/old_file.py --output cline_docs/dependency_tracker.md`*
+6.  **`merge-trackers <primary_tracker> <secondary_tracker> [--output <output_path>]`**: Merges two tracker files.
+7.  **`export-tracker <tracker_file> [--format <json|csv|dot>] [--output <output_path>]`**: Exports tracker data.
+8.  **`clear-caches`**: Clears internal caches used by the dependency system (useful for debugging).
+9.  **`update-config <key_path> <value>`**: Updates a setting in `.clinerules.config.json`. (e.g., `paths.doc_dir`, `thresholds.code_similarity`).
 
-7. **`suggest-dependencies`**: Suggests dependencies for a tracker based on code analysis or semantic similarity.
-   ```
-   python -m cline_utils.dependency_system.dependency_processor suggest-dependencies --tracker tracker_file --tracker_type main|doc|mini
-   ```
-   *Example: `python -m cline_utils.dependency_system.dependency_processor suggest-dependencies --tracker cline_docs/dependency_tracker.md --tracker_type main`*
-   *Error Note: For `doc` type, requires `metadata.json` from `generate-embeddings`; run it first if missing.*
-
-8. **`generate-embeddings`**: Generates embeddings for files in the given root paths.
-   ```
-   python -m cline_utils.dependency_system.dependency_processor generate-embeddings path1 path2 --output output_dir --model model_name
-   ```
-   *Example: `python -m cline_utils.dependency_system.dependency_processor generate-embeddings src tests --output cline_docs --model all-mpnet-base-v2`*
-   *Error Note: Fails if model isn't installed; ensure `sentence_transformers` is available.*
+*(Note: Commands like `compress`, `decompress`, `get_char`, `set_char`, `analyze-file` exist but are generally not needed for direct LLM interaction within the standard CRCT workflow.)*
 
 ---
 
-## X. Plugin Usage Guidance
+## IX. Plugin Usage Guidance
 
 **Always check `.clinerules` for `current_phase`.**
 - **Set-up/Maintenance**: Initial setup, adding modules/docs, periodic maintenance (`cline_docs/prompts/setup_maintenance_plugin.md`).
-- **Strategy**: Task decomposition, instruction file creation, prioritization (`cline_docs/prompts/strategy_plugin.md`). *NEW* strategy_tasks directory to store detailed plans and strategic approaches.
+- **Strategy**: Task decomposition, instruction file creation, prioritization (`cline_docs/prompts/strategy_plugin.md`).
 - **Execution**: Task execution, code/file modifications (`cline_docs/prompts/execution_plugin.md`).
 
 ---
 
-## XI. Identifying Code Root Directories
+## X. Identifying Code Root Directories
 
 This process is part of the Set-up/Maintenance phase and is performed if the `[CODE_ROOT_DIRECTORIES]` section in `.clinerules` is empty or missing.
 
@@ -349,11 +282,50 @@ This process is part of the Set-up/Maintenance phase and is performed if the `[C
 5. **MUP**: Follow the Mandatory Update Protocol.
 
 **Example Chain of Thought:**
-"Scanning the project root, I see directories: `.vscode`, `docs`, `cline_docs`, `src`, `cline_utils`, `venv`. `.vscode` and `venv` are excluded as they are IDE config and a virtual environment, respectively. `docs` and `cline_docs` are excluded as they are documentation. `src` contains Python files directly, so it's a strong candidate. `cline_utils` also contains `.py` files and appears to be project-specific, so it’s included. Therefore, I will add `src` and `cline_utils` to the `[CODE_ROOT_DIRECTORIES]` section of `.clinerules`."
+"Scanning the project root, I see directories: `.vscode`, `docs`, `cline_docs`, `src`, `cline_utils`, `venv`. `.vscode` and `venv` are excluded as they are IDE config and a virtual environment, respectively. `docs` and `cline_docs` are excluded as they are documentation. `src` contains Python files directly, so it's a strong candidate. `cline_utils` also contains `.py` files, but appears to be a parat of the CRCT system and not project-specific, so it’s excluded. Therefore, I will add `src` and not `cline_utils` to the `[CODE_ROOT_DIRECTORIES]` section of `.clinerules`."
 
 ---
 
-## XII. Conclusion
+## XI. Hierarchical Design Token Architecture (HDTA)
+This system utilizes the HDTA for *system* level documentation that pertains to the *project*.  Information is organized into four tiers:
+
+1.  **System Manifest:** Top-level overview (stored in `system_manifest.md`). Created during Set-up/Maintenance.
+2.  **Domain Modules:** Describe major functional areas (`{module_name}_module.md`). Created during Set-up/Maintenance.
+3.  **Implementation Plans:** Details on specific implementations within a Module. (Files contained within modules) Created during Strategy.
+4.  **Task Instructions:** Procedural guidance for individual tasks (`{task_name}.md`). Created during Strategy.
+
+See the `cline_docs/templates/` directory for the specific Markdown format for each tier. Dependencies between these documents are managed *manually* by the LLM.
+
+---
+
+## XII. Mandatory Periodic Documentation Updates
+
+The LLM **MUST** perform a complete Mandatory Update Protocol (MUP) every 5 turns/interactions, regardless of task completion status. This periodic update requirement ensures:
+
+1. Regular documentation of progress
+2. Consistent state maintenance
+3. Clean-up of completed tasks
+4. Prevention of context drift
+
+**Procedure for 5-Turn MUP:**
+1. Count interactions since last MUP
+2. On the 5th turn, pause current task execution
+3. Perform full MUP as specified in Section VI:
+   - Update `activeContext.md` with current progress
+   - Update `changelog.md` with significant changes made to project files
+   - Update `.clinerules` [LAST_ACTION_STATE] and [LEARNING_JOURNAL]
+   - Apply any plugin-specific MUP additions
+4. Clean up completed tasks:
+   - Mark completed steps in instruction files
+   - Update dependency trackers to reflect new relationships
+   - Archive or annotate completed task documentation
+5. Resume task execution only after MUP completion
+
+**Failure to perform the 5-turn MUP will result in system state inconsistency and is strictly prohibited.**
+
+---
+
+## XIII. Conclusion
 
 The CRCT framework manages complex tasks via recursive decomposition and persistent state. Adhere to this prompt and plugin instructions in `cline_docs/prompts/` for effective task management.
 
