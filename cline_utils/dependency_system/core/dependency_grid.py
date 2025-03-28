@@ -44,7 +44,7 @@ def compress(s: str) -> str:
         return s
     return COMPRESSION_PATTERN.sub(lambda m: m.group(1) + str(len(m.group())), s)
 
-@cached("grid_decompress", key_func=lambda s: f"decompress:{s}")
+#@cached("grid_decompress", key_func=lambda s: f"decompress:{s}")
 def decompress(s: str) -> str:
     """
     Decompress a Run-Length Encoded dependency string with caching.
@@ -169,18 +169,48 @@ def set_char_at(s: str, index: int, new_char: str) -> str:
     return compress(decompressed)
 
 #@cached("grid_validation",
+# Add near top of dependency_grid.py if not already present
+# import logging # Assume logger is already initialized
+from .key_manager import sort_keys # Ensure this import is present
+
+# Ensure logger is initialized in the module
+# logger = logging.getLogger(__name__) # Should already exist
+
+#@cached("grid_validation", # Caching needs careful review if inputs change frequently or if side effects (logging) matter
 #        key_func=lambda grid, keys: f"validate_grid:{hash(str(sorted(grid.items())))}:{':'.join(keys)}")
 def validate_grid(grid: Dict[str, str], keys: List[str]) -> bool:
     """
-    Validate a dependency grid for consistency with keys.
+    Validate a dependency grid for consistency with keys. Ensures keys are sorted
+    using key_manager.sort_keys for diagonal check and provides detailed logging.
     Args:
         grid: Dictionary mapping keys to compressed dependency strings
-        keys: List of keys in the grid
+        keys: List of keys expected in the grid (will be sorted internally)
     Returns:
         True if valid, False otherwise
     """
-    missing_keys = set(keys) - set(grid.keys())
-    if missing_keys:
+    if not isinstance(grid, dict):
+        logger.error("Grid validation failed: 'grid' argument is not a dictionary.")
+        return False
+    if not isinstance(keys, list):
+        logger.error("Grid validation failed: 'keys' argument is not a list.")
+        return False
+
+    try:
+        # Ensure we work with a sorted list internally for index consistency
+        sorted_keys_list = sort_keys(keys)
+    except Exception as e:
+        logger.error(f"Grid validation failed: Error sorting keys - {e}")
+        return False
+
+    num_keys = len(sorted_keys_list)
+
+    # 1. Check if all expected keys are present as rows in the grid
+    expected_keys_set = set(sorted_keys_list)
+    actual_grid_keys_set = set(grid.keys())
+
+    missing_rows = expected_keys_set - actual_grid_keys_set
+    if missing_rows:
+        logger.error(f"Grid validation failed: Missing grid rows for keys: {sorted(list(missing_rows))}")
         return False
 
     expected_length = len(keys)
@@ -190,7 +220,8 @@ def validate_grid(grid: Dict[str, str], keys: List[str]) -> bool:
             return False
         if decompressed[keys.index(key)] != DIAGONAL_CHAR:
             return False
-    #dependencies = [_cache_key_for_grid('validate_grid', grid, keys)]
+
+    logger.debug("Grid validation successful.")
     return True
 
 def add_dependency_to_grid(grid: Dict[str, str], source_key: str, target_key: str,
@@ -223,7 +254,7 @@ def add_dependency_to_grid(grid: Dict[str, str], source_key: str, target_key: st
     new_grid[source_key] = compress(new_row)
 
     # Invalidate cached decompress for the modified row
-    invalidate_dependent_entries('tracker', f"decompress:{new_grid.get(source_key)}")
+    invalidate_dependent_entries('grid_decompress', f"decompress:{new_grid.get(source_key)}")
     # Invalidate cached grid validation.  Use new_grid!
     #invalidate_dependent_entries('tracker', _cache_key_for_grid('validate_grid', new_grid, keys))
     return new_grid

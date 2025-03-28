@@ -24,7 +24,7 @@ from cline_utils.dependency_system.io.update_doc_tracker import doc_tracker_data
 from cline_utils.dependency_system.io.update_mini_tracker import get_mini_tracker_data
 from cline_utils.dependency_system.io.update_main_tracker import main_tracker_data
 from cline_utils.dependency_system.utils.cache_manager import cached, check_file_modified, invalidate_dependent_entries # Removed tracker_modified as it's not defined in cache_manager provided
-from cline_utils.dependency_system.core.dependency_grid import compress, create_initial_grid, decompress, validate_grid, PLACEHOLDER_CHAR, EMPTY_CHAR, DIAGONAL_CHAR
+from cline_utils.dependency_system.core.dependency_grid import compress, create_initial_grid, decompress, validate_grid, PLACEHOLDER_CHAR, EMPTY_CHAR, DIAGONAL_CHAR # Added validate_grid import
 
 import logging
 logger = logging.getLogger(__name__)
@@ -171,6 +171,12 @@ def write_tracker_file(tracker_path: str, keys: Dict[str, str], grid: Dict[str, 
 
         # Sort keys for consistent output
         sorted_keys_list = sort_keys(list(keys.keys()))
+ 
+        # --- Validate grid before writing ---
+        if not validate_grid(grid, sorted_keys_list): # Use the sorted list for validation
+            logger.error(f"Aborting write to {tracker_path} due to grid validation failure. Check previous logs for details.")
+            return False
+        # --- End Validation ---
 
         with open(tracker_path, 'w', encoding='utf-8') as f:
             # --- Write key definitions ---
@@ -697,8 +703,10 @@ def update_tracker(output_file: str, # Note: output_file might be recalculated i
             keys_to_write_defs = {k: key_map[k] for k in relevant_keys if k in key_map} # Definitions use relevant keys
             sorted_keys_list = sort_keys(relevant_keys)
             last_key_edit_msg = f"Assigned keys: {', '.join(relevant_new_keys)}" if relevant_new_keys else (sorted_keys_list[-1] if sorted_keys_list else "Initial creation")
+            initial_grid = create_initial_grid(sorted_keys_list) # Generate initial placeholder grid
+            logger.debug(f"Generated initial grid with {len(initial_grid)} rows for new tracker {output_file}.") # Added log message
             # Write using the generic write function
-            write_tracker_file(output_file, keys_to_write_defs, {}, last_key_edit_msg, "Initial creation")
+            write_tracker_file(output_file, keys_to_write_defs, initial_grid, last_key_edit_msg, "Initial creation")
         # REMOVED: No further update needed after creation in this call
         # REMOVED: return # <<< REMOVE THIS RETURN to allow suggestions to be applied to newly created files
 
@@ -801,12 +809,13 @@ def update_tracker(output_file: str, # Note: output_file might be recalculated i
                     # Apply the suggestion passed from project_analyzer (priority already handled)
                     # Check if the character is actually changing to avoid unnecessary grid edit message update
                     existing_char = current_decomp_row[col_idx]
-                    if existing_char != dep_char:
+                    # --- Apply suggestion ONLY if current char is a placeholder ---
+                    if existing_char == PLACEHOLDER_CHAR and existing_char != dep_char:
                         # Ensure we don't overwrite the diagonal 'o'
                         if row_key != col_key:
                              current_decomp_row[col_idx] = dep_char
                              suggestion_applied = True
-                             # Update last edit message only if a suggestion was actually applied and changed the char
+                             # Update last edit message only if a suggestion was actually applied (placeholder -> suggestion)
                              final_last_grid_edit = f"Applied suggestion: {row_key} -> {col_key} ({dep_char})"
                         # else: logger.debug(f"Skipping suggestion {row_key}->{col_key}; Attempted to overwrite diagonal.") # Optional debug
                     # else: logger.debug(f"Suggestion {row_key}->{col_key} ({dep_char}) matches existing character. No change.")

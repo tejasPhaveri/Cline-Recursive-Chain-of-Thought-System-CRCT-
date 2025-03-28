@@ -10,13 +10,14 @@ import sys
 
 from cline_utils.dependency_system.analysis.project_analyzer import analyze_project
 
-from cline_utils.dependency_system.core.dependency_grid import compress, decompress, get_char_at, set_char_at, add_dependency_to_grid, remove_dependency_from_grid
+from cline_utils.dependency_system.core.dependency_grid import compress, decompress, get_char_at, set_char_at, add_dependency_to_grid
 from cline_utils.dependency_system.io.tracker_io import remove_file_from_tracker, merge_trackers, read_tracker_file, write_tracker_file, export_tracker
 from cline_utils.dependency_system.utils.path_utils import get_project_root, normalize_path
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
 from cline_utils.dependency_system.utils.cache_manager import clear_all_caches, file_modified
 from cline_utils.dependency_system.analysis.dependency_analyzer import analyze_file
 from cline_utils.dependency_system.core.dependency_grid import get_dependencies_from_grid # Added
+from cline_utils.dependency_system.core.key_manager import sort_keys # Added for consistent sorting
 # from cline_utils.dependency_system.io.tracker_io import get_tracker_paths # Assuming this exists or similar logic needed
 import glob # Added
 
@@ -220,8 +221,18 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
         if not tracker_data or not tracker_data.get("keys"):
             print(f"Error: Could not read tracker file or no keys found: {args.tracker}")
             return 1
+ 
+        # --- Dependency Type Validation ---
+        # Based on .clinerules Character_Definitions
+        ALLOWED_DEP_TYPES = {'<', '>', 'x', 'd', 'o', 'n', 'p', 's', 'S'}
+        if args.dep_type not in ALLOWED_DEP_TYPES:
+            print(f"Error: Invalid dependency type '{args.dep_type}'. Allowed types are: {', '.join(sorted(list(ALLOWED_DEP_TYPES)))}")
+            # Log the error as well
+            logger.error(f"Invalid dependency type '{args.dep_type}' provided via add-dependency command.")
+            return 1
+        # --- End Validation ---
 
-        keys = list(tracker_data["keys"].keys()) # Use sorted list if order matters more than insertion
+        keys = sort_keys(list(tracker_data["keys"].keys())) # Ensure keys are sorted using key_manager.sort_keys for consistent indexing
         if args.source_key not in keys or args.target_key not in keys:
             print(f"Error: Source '{args.source_key}' or target '{args.target_key}' not found in tracker")
             return 1

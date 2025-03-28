@@ -37,10 +37,9 @@ logger = logging.getLogger(__name__)
 # s: Semantic dependency (weak .06-.07) - Adjusted based on .clinerules
 # S: Semantic dependency (strong .07+) - Added based on .clinerules
 
-# Define thresholds based on .clinerules definitions
-suggestion_threshold_s_weak = 0.6 # Lower bound for 's'
-suggestion_threshold_S_strong = 0.7 # Lower bound for 'S'
-# suggestion_threshold = 0.7 # Old threshold, can be removed or kept for other purposes if needed
+# REMOVED: Hardcoded thresholds. Will read from ConfigManager.
+# suggestion_threshold_s_weak = 0.6
+# suggestion_threshold_S_strong = 0.7
 
 def clear_caches():
     """Clear all internal caches."""
@@ -318,16 +317,24 @@ def suggest_semantic_dependencies(file_path: str, key_map: Dict[str, str], proje
 
         confidence = calculate_similarity(file_key, other_key, embeddings_dir, key_map, project_root, code_roots, doc_roots)
 
-        # Determine character based on new thresholds
+        # --- Read thresholds from config ---
+        # Use .get_threshold() which handles defaults if key is missing
+        threshold_S_strong = config.get_threshold("code_similarity") # 'S' uses code_similarity (Default is 0.7 in config_manager)
+        threshold_s_weak = config.get_threshold("doc_similarity")   # 's' uses doc_similarity (Default is 0.65 in config_manager)
+
+        # --- Log raw confidence BEFORE thresholding ---
+        logger.debug(f"Raw confidence {file_key} -> {other_key}: {confidence:.4f}") # Log raw score
+
+        # Determine character based on config thresholds
         assigned_char = None
-        if confidence >= suggestion_threshold_S_strong:
+        if confidence >= threshold_S_strong:
             assigned_char = 'S'
-            logger.debug(f"Suggesting {file_key} -> {other_key} ('S') due to strong semantic similarity (confidence: {confidence:.2f} >= {suggestion_threshold_S_strong:.2f}).")
-        elif confidence >= suggestion_threshold_s_weak:
+            logger.debug(f"Suggesting {file_key} -> {other_key} ('S') due to strong semantic similarity (confidence: {confidence:.4f} >= {threshold_S_strong:.2f}).")
+        elif confidence >= threshold_s_weak:
             assigned_char = 's'
-            logger.debug(f"Suggesting {file_key} -> {other_key} ('s') due to weak semantic similarity (confidence: {confidence:.2f} >= {suggestion_threshold_s_weak:.2f}).")
+            logger.debug(f"Suggesting {file_key} -> {other_key} ('s') due to weak semantic similarity (confidence: {confidence:.4f} >= {threshold_s_weak:.2f}).")
         # else: # Confidence below weak threshold, no suggestion generated
-            # logger.debug(f"Confidence {confidence:.2f} for {file_key} -> {other_key} below weak threshold {suggestion_threshold_s_weak:.2f}. No suggestion.")
+            # logger.debug(f"Confidence {confidence:.4f} for {file_key} -> {other_key} below weak threshold {threshold_s_weak:.2f}. No suggestion.")
 
         if assigned_char:
             suggested_dependencies.append((other_key, assigned_char))
