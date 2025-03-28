@@ -1,358 +1,258 @@
+"""
+Cache management module with dynamic, TTL-based caching for dependency tracking system.
+Supports on-demand cache creation, automatic expiration, and granular invalidation.
+"""
+
 import functools
 import os
-import json
 import time
-from typing import Dict, Any, Callable, TypeVar, Optional, List
+import re
+import json
+from typing import Dict, Any, Callable, TypeVar, Optional, List, Tuple
+import logging
 
-from cline_utils.dependency_system.utils.path_utils import normalize_path
+from .path_utils import normalize_path
 
-# Define type variable for decorating functions.
+logger = logging.getLogger(__name__)
+
 F = TypeVar('F', bound=Callable[..., Any])
 
-# Define constants and global variables
+# Configuration
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache')
-TRACKER_CACHE_FILE = os.path.join(CACHE_DIR, 'tracker_cache.json')
-SUGGESTION_CACHE_FILE = os.path.join(CACHE_DIR, 'suggestion_cache.json')
-METADATA_CACHE_FILE = os.path.join(CACHE_DIR, 'metadata_cache.json')
-PATH_CACHE_FILE = os.path.join(CACHE_DIR, 'path_cache.json')
-MAX_CACHE_SIZE = 1000  # Maximum number of items in each cache
+DEFAULT_MAX_SIZE = 1000  # Default max items per cache
+DEFAULT_TTL = 600  # 10 minutes in seconds
+CACHE_SIZES = {
+    "embeddings_generation": 100,  # Smaller for heavy data
+    "key_generation": 5000,        # Larger for key maps
+    "default": DEFAULT_MAX_SIZE
+}
 
-# Caches
-tracker_cache: Dict[str, Any] = {}
-suggestion_cache: Dict[str, Dict] = {}
-metadata_cache: Dict[str, Dict] = {}  # Used for timestamps
-path_cache: Dict[str, str] = {}
+class Cache:
+    """A single cache instance with LRU eviction, per-entry TTL, and dependency tracking."""
+    def __init__(self, name: str, ttl: int = DEFAULT_TTL, max_size: int = DEFAULT_MAX_SIZE):
+        self.name = name
+        self.data: Dict[str, Tuple[Any, float, Optional[float]]] = {}  # (value, access_time, expiry_time)
+        self.dependencies: Dict[str, List[str]] = {}  # key -> dependent keys
+        self.reverse_deps: Dict[str, List[str]] = {}  # key -> keys that depend on it
+        self.creation_time = time.time()
+        self.default_ttl = ttl
+        self.max_size = CACHE_SIZES.get(name, max_size)
+        self.hits = 0
+        self.misses = 0
 
-# Time tracking for cache entries
-tracker_cache_access_times: Dict[str, float] = {}
-suggestion_cache_access_times: Dict[str, float] = {}
-metadata_cache_access_times: Dict[str, float] = {}
-path_cache_access_times: Dict[str, float] = {}
+    def get(self, key: str) -> Any:
+        if key in self.data:
+            value, _, expiry = self.data[key]
+            if expiry is None or time.time() < expiry:
+                self.data[key] = (value, time.time(), expiry)  # Update access time
+                self.hits += 1
+                return value
+            else:
+                del self.data[key]
+                if key in self.reverse_deps:
+                    del self.reverse_deps[key]
+        self.misses += 1
+        return None
 
-# Dependency tracking between cache entries
-tracker_cache_dependencies: Dict[str, List[str]] = {}
-suggestion_cache_dependencies: Dict[str, List[str]] = {}
-metadata_cache_dependencies: Dict[str, List[str]] = {}
-path_cache_dependencies: Dict[str, List[str]] = {}
+    def set(self, key: str, value: Any, dependencies: Optional[List[str]] = None, ttl: Optional[int] = None) -> None:
+        if len(self.data) >= self.max_size:
+            self._evict_lru()
+        expiry = time.time() + (ttl if ttl is not None else self.default_ttl) if ttl != 0 else None
+        self.data[key] = (value, time.time(), expiry)
+        if dependencies:
+            for dep in dependencies:
+                if dep not in self.dependencies:
+                    self.dependencies[dep] = []
+                self.dependencies[dep].append(key)
+                if key not in self.reverse_deps:
+                    self.reverse_deps[key] = []
+                self.reverse_deps[key].append(dep)
+
+    def _evict_lru(self) -> None:
+        if not self.data:
+            return
+        lru_key = min(self.data, key=lambda k: self.data[k][1])
+        self._remove_key(lru_key)
+
+    def _remove_key(self, key: str) -> None:
+        if key in self.data:
+            del self.data[key]
+        if key in self.reverse_deps:
+            for dep in self.reverse_deps[key]:
+                if dep in self.dependencies and key in self.dependencies[dep]:
+                    self.dependencies[dep].remove(key)
+                if dep in self.dependencies and not self.dependencies[dep]:
+                    del self.dependencies[dep]
+            del self.reverse_deps[key]
+
+    def cleanup_expired(self) -> None:
+        """Remove all expired entries."""
+        expired_keys = [k for k, (_, _, expiry) in self.data.items() if expiry and time.time() > expiry]
+        for key in expired_keys:
+            self._remove_key(key)
+
+    def is_expired(self) -> bool:
+        return (time.time() - self.creation_time) > self.default_ttl and not self.data
+
+    def invalidate(self, key_pattern: str) -> None:
+        """Invalidate entries matching a key pattern (supports regex)."""
+        compiled_pattern = re.compile(key_pattern)
+        keys_to_remove = [k for k in self.data if compiled_pattern.match(k)]
+        for key in keys_to_remove:
+            self._remove_key(key)
+            if key in self.dependencies:
+                dependent_keys = self.dependencies.pop(key)
+                for dep_key in dependent_keys:
+                    self._remove_key(dep_key)
+
+    def stats(self) -> Dict[str, int]:
+        return {"hits": self.hits, "misses": self.misses, "size": len(self.data)}
+
+class CacheManager:
+    """Manages multiple caches with persistence and cleanup."""
+    def __init__(self, persist: bool = False):
+        self.caches: Dict[str, Cache] = {}
+        self.persist = persist
+        if persist:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            self._load_persistent_caches()
+
+    def get_cache(self, cache_name: str, ttl: int = DEFAULT_TTL) -> Cache:
+        """Retrieve or create a cache by name."""
+        if cache_name not in self.caches or self.caches[cache_name].is_expired():
+            self.caches[cache_name] = Cache(cache_name, ttl)
+            logger.debug(f"Spun up new cache: {cache_name} with TTL {ttl}s")
+        return self.caches[cache_name]
+
+    def cleanup(self) -> None:
+        """Remove expired caches."""
+        expired = [name for name, cache in self.caches.items() if cache.is_expired()]
+        for name in expired:
+            if self.persist:
+                self._save_cache(name)
+            del self.caches[name]
+            logger.debug(f"Spun down expired cache: {name}")
+        for cache in self.caches.values():
+            cache.cleanup_expired()
+
+    def clear_all(self) -> None:
+        if self.persist:
+            for name in self.caches:
+                self._save_cache(name)
+        self.caches.clear()
+        logger.info("All caches cleared.")
+
+    def _save_cache(self, cache_name: str) -> None:
+        if cache_name in self.caches:
+            cache_file = os.path.join(CACHE_DIR, f"{cache_name}.json")
+            try:
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    data = {
+                        "data": {k: v[0] for k, v in self.caches[cache_name].data.items() if v[2] is None or v[2] > time.time()},
+                        "dependencies": self.caches[cache_name].dependencies
+                    }
+                    json.dump(data, f)
+            except Exception as e:
+                logger.error(f"Failed to save cache {cache_name}: {e}")
+
+    def _load_persistent_caches(self) -> None:
+        for cache_file in os.listdir(CACHE_DIR):
+            if cache_file.endswith('.json'):
+                cache_name = cache_file[:-5]
+                try:
+                    with open(os.path.join(CACHE_DIR, cache_file), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        cache = Cache(cache_name)
+                        for key, value in data["data"].items():
+                            cache.set(key, value)  # No TTL for reloaded items
+                        cache.dependencies = data.get("dependencies", {})
+                        self.caches[cache_name] = cache
+                    logger.debug(f"Loaded persistent cache: {cache_name}")
+                except Exception as e:
+                    logger.error(f"Failed to load cache {cache_name}: {e}")
+
+cache_manager = CacheManager(persist=False)  # Toggle to True for persistence
 
 def get_tracker_cache_key(tracker_path: str, tracker_type: str) -> str:
-    """
-    Generate a cache key for tracker operations.
-
-    Args:
-        tracker_path: Path to the tracker file
-        tracker_type: Type of tracker
-
-    Returns:
-        Cache key string
-    """
-    from cline_utils.dependency_system.utils.path_utils import normalize_path
-    return f"{normalize_path(tracker_path)}:{tracker_type}"
-
-def get_from_tracker_cache(key: str) -> Any:
-    """Retrieves a value from the tracker cache if it exists and is not stale."""
-    if key in tracker_cache:
-        tracker_cache_access_times[key] = time.time()
-        return tracker_cache[key]
-    return None
-
-def set_in_tracker_cache(key: str, value: Any, dependencies: Optional[List[str]] = None) -> None:
-    """Sets a key-value pair in the tracker cache and tracks dependencies."""
-    if len(tracker_cache) >= MAX_CACHE_SIZE:
-        _cleanup_cache(tracker_cache, tracker_cache_access_times)
-    tracker_cache[key] = value
-    tracker_cache_access_times[key] = time.time()
-    if dependencies:
-        for dep in dependencies:
-            if dep not in tracker_cache_dependencies:
-                tracker_cache_dependencies[dep] = []
-            tracker_cache_dependencies[dep].append(key)
-
-def get_from_suggestion_cache(key: str) -> Any:
-    """Retrieve a value from the suggestion cache"""
-    if key in suggestion_cache:
-        suggestion_cache_access_times[key] = time.time()
-        return suggestion_cache[key]
-    return None
-
-def set_in_suggestion_cache(key: str, value: Any, dependencies: Optional[List[str]] = None) -> None:
-    """Sets a key-value pair in the suggestion cache"""
-    if len(suggestion_cache) >= MAX_CACHE_SIZE:
-        _cleanup_cache(suggestion_cache, suggestion_cache_access_times)
-    suggestion_cache[key] = value
-    suggestion_cache_access_times[key] = time.time()
-    if dependencies:
-        for dep in dependencies:
-            if dep not in suggestion_cache_dependencies:
-                suggestion_cache_dependencies[dep] = []
-            suggestion_cache_dependencies[dep].append(key)
-
-def get_from_metadata_cache(key: str) -> Any:
-    """Retrieve a value from the metadata cache"""
-    if key in metadata_cache:
-        metadata_cache_access_times[key] = time.time()
-        return metadata_cache[key]
-    return None
-
-def set_in_metadata_cache(key: str, value: Any, dependencies: Optional[List[str]] = None) -> None:
-    """Set a value in the metadata cache"""
-    if len(metadata_cache) >= MAX_CACHE_SIZE:
-      _cleanup_cache(metadata_cache, metadata_cache_access_times)
-    metadata_cache[key] = value
-    metadata_cache_access_times[key] = time.time()
-    if dependencies:
-      for dep in dependencies:
-        if dep not in metadata_cache_dependencies:
-          metadata_cache_dependencies[dep] = []
-        metadata_cache_dependencies[dep].append(key)
-
-def get_from_path_cache(key: str) -> Any:
-    """Retrieve a value from the path cache."""
-    if key in path_cache:
-        path_cache_access_times[key] = time.time()
-        return path_cache[key]
-    return None
-
-def set_in_path_cache(key: str, value: Any, dependencies: Optional[List[str]] = None) -> None:
-    """Set a value in the path cache."""
-    if len(path_cache) >= MAX_CACHE_SIZE:
-        _cleanup_cache(path_cache, path_cache_access_times)
-    path_cache[key] = value
-    path_cache_access_times[key] = time.time()
-    if dependencies:
-        for dep in dependencies:
-            if dep not in path_cache_dependencies:
-                path_cache_dependencies[dep] = []
-            path_cache_dependencies[dep].append(key)
-
-
-def _cleanup_cache(cache: Dict, access_times: Dict) -> None:
-    """
-    Removes the least recently used items from the cache if it exceeds
-    the maximum size.
-
-    Args:
-        cache: The cache dictionary.
-        access_times: A dictionary storing the last access time of each item.
-    """
-    if len(cache) >= MAX_CACHE_SIZE:
-        oldest_key = min(access_times, key=access_times.get)
-        del cache[oldest_key]
-        del access_times[oldest_key]
+    return f"tracker:{normalize_path(tracker_path)}:{tracker_type}"
 
 def clear_all_caches() -> None:
-    """Clears all the caches"""
-    global tracker_cache, suggestion_cache, metadata_cache, path_cache
-    global tracker_cache_access_times, suggestion_cache_access_times, metadata_cache_access_times, path_cache_access_times
-
-    tracker_cache = {}
-    suggestion_cache = {}
-    metadata_cache = {}
-    path_cache = {}
-    tracker_cache_access_times = {}
-    suggestion_cache_access_times = {}
-    metadata_cache_access_times = {}
-    path_cache_access_times = {}
+    """Clear all caches in the manager."""
+    cache_manager.clear_all()
 
 def invalidate_dependent_entries(cache_name: str, key: str) -> None:
-    """
-    Invalidate cache entries that depend on a given key.
+    """Invalidate cache entries matching a key pattern."""
+    cache = cache_manager.get_cache(cache_name)
+    cache.invalidate(key)
 
-    Args:
-      cache_name: The name of the cache ('tracker', 'suggestion', 'metadata', 'path').
-      key: The key of the modified entry.
-    """
-    if cache_name == 'tracker':
-        cache = tracker_cache
-        access_times = tracker_cache_access_times
-        dependencies = tracker_cache_dependencies
-    elif cache_name == 'suggestion':
-        cache = suggestion_cache
-        access_times = suggestion_cache_access_times
-        dependencies = suggestion_cache_dependencies
-    elif cache_name == 'metadata':
-      cache = metadata_cache
-      access_times = metadata_cache_access_times
-      dependencies = metadata_cache_dependencies
-    elif cache_name == 'path':
-        cache = path_cache
-        access_times = path_cache_access_times
-        dependencies = path_cache_dependencies
-    else:
-      return
+def file_modified(file_path: str, project_root: str, cache_type: str = "all") -> None:
+    """Invalidate caches when a file is modified."""
+    norm_path = normalize_path(file_path)
+    norm_root = normalize_path(project_root)
+    key = f".*:{norm_path}:.*" if cache_type == "all" else f"{cache_type}:{norm_path}:.*"
+    for cache_name in cache_manager.caches:
+        invalidate_dependent_entries(cache_name, key)
 
-    if key in dependencies:
-        dependent_keys = dependencies.pop(key)
-        for dep_key in dependent_keys:
-            if dep_key in cache:
-                del cache[dep_key]
-                del access_times[dep_key]
-                # Recursively invalidate dependencies of dependent keys.
-                invalidate_dependent_entries(cache_name, dep_key)
+def tracker_modified(tracker_path: str, tracker_type: str, project_root: str, cache_type: str = "all") -> None:
+    """Invalidate caches when a tracker is modified."""
+    norm_path = normalize_path(tracker_path)
+    key = get_tracker_cache_key(tracker_path, tracker_type) if cache_type == "all" else f"{cache_type}:{norm_path}:.*"
+    invalidate_dependent_entries("tracker", key)
 
-def file_modified(file_path: str, project_root: str, cache_type: str = "all"):
-    """
-    Call this function whenever a file is modified.  This is crucial for
-    invalidating the cache.  Now with granular invalidation based on file type.
-
-    Args:
-        file_path: The path to the modified file.
-        project_root: The project root directory.
-        cache_type: The type of analysis cache to invalidate ('all', 'code', 'file', 'py', 'js', 'md', etc.)
-    """
-    if cache_type == "all":
-        invalidate_dependent_entries(
-            'path',
-            f"analysis:.*:{normalize_path(file_path)}:"
-            f"{normalize_path(project_root)}:.*"
-        )
-    else:
-        invalidate_dependent_entries(
-            'path',
-            f"analysis:{cache_type}:{normalize_path(file_path)}:"
-            f"{normalize_path(project_root)}:.*"
-        )
-
-def tracker_modified(tracker_path: str, tracker_type: str, project_root: str, cache_type: str = "all"):
-    """
-    Call this function whenever a tracker file is modified.  This is crucial for
-    invalidating the cache.
-
-    Args:
-        tracker_path: The path to the modified tracker file.
-        tracker_type: The type of tracker.
-        project_root: The project root directory.
-        cache_type: The type of analysis cache to invalidate ('all', 'code', 'file', 'py', 'js', 'md', etc.)
-    """
-    if cache_type == "all":
-        invalidate_dependent_entries(
-            'tracker',
-            get_tracker_cache_key(tracker_path, tracker_type)
-        )
-    else:
-        invalidate_dependent_entries(
-            'tracker',
-            f"analysis:{cache_type}:.*:{normalize_path(tracker_path)}:"
-            f"{normalize_path(project_root)}:.*"
-        )
-        
-def cached(cache_name: str, key_func=None):
-    """
-    Decorator for caching function results, with support for dependency tracking and invalidation.
-
-    Args:
-        cache_name: Name of the cache to use ('tracker', 'suggestion', 'metadata', 'path')
-        key_func: Optional function to generate cache key from function arguments
-
-    Returns:
-        Decorated function
-    """
+def cached(cache_name: str, key_func: Optional[Callable] = None, ttl: Optional[int] = DEFAULT_TTL):
+    """Decorator for caching with dynamic dependencies and TTL."""
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            # Generate cache key
-            if key_func:
-                key = key_func(*args, **kwargs)
-            else:
-                # Default key is function name + args + kwargs
-                key = f"{func.__name__}:{str(args)}:{str(kwargs)}"
-
-            # Get from appropriate cache
-            if cache_name == 'tracker':
-                result = get_from_tracker_cache(key)
-            elif cache_name == 'suggestion':
-                result = get_from_suggestion_cache(key)
-            elif cache_name == 'metadata':
-                result = get_from_metadata_cache(key)
-            elif cache_name == 'path':
-                result = get_from_path_cache(key)
-            elif cache_name == 'file_type':
-                result = get_from_path_cache(key)
-            else:
-                raise ValueError(f"Unknown cache name: {cache_name}")
-
+            key = key_func(*args, **kwargs) if key_func else f"{func.__name__}:{str(args)}:{str(kwargs)}"
+            cache = cache_manager.get_cache(cache_name, ttl)
+            result = cache.get(key)
             if result is not None:
+                #logger.debug(f"Cache hit: {cache_name}:{key}")
                 return result
-
-            # Cache miss, call function
+            #logger.debug(f"Cache miss: {cache_name}:{key}")
             result = func(*args, **kwargs)
-
-            # Determine dependencies (this is where you'd customize based on your function)
             dependencies = []
-            # Example:  If caching load_embedding, the dependency is the file itself.
-            if func.__name__ == 'load_embedding':
-                dependencies.append(f"file:{args[0]}:{args[1]}")  # file:key:embeddings_dir
-            # Add other dependency logic as needed for other functions.
-            # Example: If caching load_metadata, depend on the metadata file.
-            elif func.__name__ == 'load_metadata':
-                dependencies.append(f"file:{normalize_path(args[0])}")
-
-            # Store in appropriate cache
-            if cache_name == 'tracker':
-                set_in_tracker_cache(key, result, dependencies)
-            elif cache_name == 'suggestion':
-                set_in_suggestion_cache(key, result, dependencies)
-            elif cache_name == 'metadata':
-                set_in_metadata_cache(key, result, dependencies)
-            elif cache_name == 'path':
-                set_in_path_cache(key, result, dependencies)
-            elif cache_name == 'file_type':
-                set_in_path_cache(key, result, dependencies)
-
-            return result
+            if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], list):
+                value, dependencies = result
+            else:
+                value = result
+                if func.__name__ in ['load_embedding', 'load_metadata', 'analyze_file', 'analyze_project', 'get_file_type']:
+                    if args and isinstance(args[0], str):
+                        dependencies.append(f"file:{normalize_path(args[0])}")
+            cache.set(key, value, dependencies, ttl)
+            cache_manager.cleanup()
+            return value
         return wrapper
     return decorator
 
-
 def check_file_modified(file_path: str) -> bool:
-    """
-    Checks if a file has been modified since the last recorded timestamp.
-    If modified, invalidates relevant cache entries.
-
-    Args:
-        file_path: The path to the file.
-        project_root: The project root directory.
-
-    Returns:
-        True if the file was modified, False otherwise.
-    """
-    from cline_utils.dependency_system.utils.path_utils import normalize_path, get_file_type
-    
+    """Check if a file has been modified, updating metadata cache."""
     norm_path = normalize_path(file_path)
     cache_key = f"timestamp:{norm_path}"
-    current_timestamp = os.path.getmtime(file_path)
-
-    cached_timestamp = get_from_metadata_cache(cache_key)
-
-    if cached_timestamp is None:
-        # First time seeing this file, store the timestamp
-        set_in_metadata_cache(cache_key, current_timestamp)
-        return False  # Consider it not modified for the first run
-    
-    try:
-        current_timestamp = os.path.getmtime(file_path)
-    except FileNotFoundError:
+    cache = cache_manager.get_cache("metadata")
+    if not os.path.exists(file_path):
         return False
-
-    if current_timestamp > cached_timestamp:
-        # File has been modified
-        set_in_metadata_cache(cache_key, current_timestamp)  # Update the timestamp
+    current_timestamp = os.path.getmtime(file_path)
+    cached_data = cache.get(cache_key)
+    if cached_data is None:
+        cache.set(cache_key, current_timestamp)
+        return False
+    if current_timestamp > cached_data:
+        cache.set(cache_key, current_timestamp)
+        from .path_utils import get_file_type
         file_type = get_file_type(file_path)
-        file_modified(file_path, os.path.dirname(file_path), file_type)  # Invalidate analysis cache with file type
+        file_modified(file_path, os.path.dirname(file_path), file_type)
         return True
-
     return False
 
-@cached('file_type', key_func=lambda file_path: normalize_path(file_path))
+@cached('file_type_cache', key_func=lambda file_path: f"file_type:{normalize_path(file_path)}:{os.path.getmtime(file_path) if os.path.exists(file_path) else 'missing'}")
 def get_file_type_cached(file_path: str) -> str:
-    """
-    Cached version of get_file_type.  Avoids redundant file type checks.
-
-    Args:
-        file_path: The path to the file.
-
-    Returns:
-        The file type string (e.g., "py", "js", "md").
-    """
-    from cline_utils.dependency_system.utils.path_utils import get_file_type
+    """Cached version of get_file_type."""
+    from .path_utils import get_file_type
     return get_file_type(file_path)
+
+def get_cache_stats(cache_name: str) -> Dict[str, int]:
+    """Get hit/miss stats for a cache."""
+    cache = cache_manager.get_cache(cache_name)
+    return cache.stats()

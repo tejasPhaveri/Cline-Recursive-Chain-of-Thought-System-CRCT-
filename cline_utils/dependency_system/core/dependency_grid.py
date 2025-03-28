@@ -9,7 +9,7 @@ from typing import Dict, List, Tuple, Optional
 
 # Import only from utils
 from cline_utils.dependency_system.utils.cache_manager import cached, invalidate_dependent_entries, clear_all_caches
-from cline_utils.dependency_system.core.key_manager import validate_key
+from .key_manager import validate_key
 
 import logging
 logger = logging.getLogger(__name__)
@@ -22,13 +22,13 @@ EMPTY_CHAR = "."
 # Compile regex pattern for RLE compression scheme (repeating characters, excluding 'o')
 COMPRESSION_PATTERN = re.compile(r'([^o])\1{2,}')
 
-def _cache_key_for_grid(func_name: str, grid: Dict[str, str], *args) -> str:
-    """Generate a cache key for grid operations."""
-    from cline_utils.dependency_system.utils.path_utils import normalize_path
-
-    grid_str = ":".join(f"{k}={v}" for k, v in sorted(grid.items()))
-    args_str = ":".join(str(a) for a in args)
-    return f"{func_name}:{grid_str}:{args_str}"
+#def _cache_key_for_grid(func_name: str, grid: Dict[str, str], *args) -> str:
+#    """Generate a cache key for grid operations."""
+#    from cline_utils.dependency_system.utils.path_utils import normalize_path
+#
+#    grid_str = ":".join(f"{k}={v}" for k, v in sorted(grid.items()))
+#    args_str = ":".join(str(a) for a in args)
+#    return f"{func_name}:{grid_str}:{args_str}"
 
 def compress(s: str) -> str:
     """
@@ -44,7 +44,7 @@ def compress(s: str) -> str:
         return s
     return COMPRESSION_PATTERN.sub(lambda m: m.group(1) + str(len(m.group())), s)
 
-@cached('tracker', key_func=lambda s: f"decompress:{s}")
+@cached("grid_decompress", key_func=lambda s: f"decompress:{s}")
 def decompress(s: str) -> str:
     """
     Decompress a Run-Length Encoded dependency string with caching.
@@ -72,8 +72,10 @@ def decompress(s: str) -> str:
             result += s[i]
             i += 1
     dependencies = [f"decompress:{s}"]
-    return result
+    return "".join(result)
 
+# @cached("initial_grids",
+#        key_func=lambda keys: f"initial_grid:{':'.join(keys)}")
 def create_initial_grid(keys: List[str]) -> Dict[str, str]:
     """
     Create an initial dependency grid with placeholders and diagonal markers.
@@ -166,7 +168,8 @@ def set_char_at(s: str, index: int, new_char: str) -> str:
     decompressed = decompressed[:index] + new_char + decompressed[index + 1:]
     return compress(decompressed)
 
-@cached('tracker', key_func=lambda grid, keys: _cache_key_for_grid('validate_grid', grid, keys))  # Added caching
+#@cached("grid_validation",
+#        key_func=lambda grid, keys: f"validate_grid:{hash(str(sorted(grid.items())))}:{':'.join(keys)}")
 def validate_grid(grid: Dict[str, str], keys: List[str]) -> bool:
     """
     Validate a dependency grid for consistency with keys.
@@ -187,7 +190,7 @@ def validate_grid(grid: Dict[str, str], keys: List[str]) -> bool:
             return False
         if decompressed[keys.index(key)] != DIAGONAL_CHAR:
             return False
-    dependencies = [_cache_key_for_grid('validate_grid', grid, keys)]
+    #dependencies = [_cache_key_for_grid('validate_grid', grid, keys)]
     return True
 
 def add_dependency_to_grid(grid: Dict[str, str], source_key: str, target_key: str,
@@ -222,11 +225,11 @@ def add_dependency_to_grid(grid: Dict[str, str], source_key: str, target_key: st
     # Invalidate cached decompress for the modified row
     invalidate_dependent_entries('tracker', f"decompress:{new_grid.get(source_key)}")
     # Invalidate cached grid validation.  Use new_grid!
-    invalidate_dependent_entries('tracker', _cache_key_for_grid('validate_grid', new_grid, keys))
+    #invalidate_dependent_entries('tracker', _cache_key_for_grid('validate_grid', new_grid, keys))
     return new_grid
 
 def remove_dependency_from_grid(grid: Dict[str, str], source_key: str, target_key: str,
-                                 keys: List[str]) -> Dict[str, str]:
+                                keys: List[str]) -> Dict[str, str]:
     """
     Remove a dependency between two keys in the grid.
 
@@ -252,14 +255,15 @@ def remove_dependency_from_grid(grid: Dict[str, str], source_key: str, target_ke
     new_row = row[:target_idx] + EMPTY_CHAR + row[target_idx + 1:]
     new_grid[source_key] = compress(new_row)
 
-    # Invalidate cached decompress for the modified row
-    invalidate_dependent_entries('tracker', f"decompress:{new_grid.get(source_key)}")
-    # Invalidate cached grid validation. Use new_grid!
-    invalidate_dependent_entries('tracker', _cache_key_for_grid('validate_grid', new_grid, keys))
+    invalidate_dependent_entries('grid_decompress', f"decompress:{new_grid[source_key]}")
+    invalidate_dependent_entries('grid_validation', f"validate_grid:{hash(str(sorted(new_grid.items())))}:{':'.join(keys)}")
     return new_grid
 
+@cached("grid_dependencies",
+        key_func=lambda grid, key, keys, direction="outgoing":
+        f"dependencies:{hash(str(sorted(grid.items())))}:{key}:{direction}")
 def get_dependencies_from_grid(grid: Dict[str, str], key: str, keys: List[str],
-                                direction: str = "outgoing") -> List[str]:
+                              direction: str = "outgoing") -> List[str]:
     """
     Get dependencies for a specific key in the grid.
 

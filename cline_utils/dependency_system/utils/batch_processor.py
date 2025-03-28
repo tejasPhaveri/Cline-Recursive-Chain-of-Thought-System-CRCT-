@@ -8,6 +8,8 @@ import time
 from typing import List, Callable, TypeVar, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from cline_utils.dependency_system.utils.cache_manager import cached
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -161,12 +163,17 @@ class BatchProcessor:
         if self.processed_items >= self.total_items:
             print()
 
-# Convenience functions
+# @cached("batch_processing",
+#        key_func=lambda items, processor_func, max_workers=None, batch_size=None, show_progress=True:
+#        f"process_items:{hash(str(items))}:{processor_func.__name__}:{max_workers}:{batch_size}:{show_progress}")
 def process_items(items: List[T], processor_func: Callable[[T], R], max_workers: Optional[int] = None, batch_size: Optional[int] = None, show_progress: bool = True) -> List[R]:
     """Convenience function to process items in parallel."""
     processor = BatchProcessor(max_workers, batch_size, show_progress)
     return processor.process_items(items, processor_func)
 
+#@cached("batch_collecting",
+ #       key_func=lambda items, processor_func, collector_func, max_workers=None, batch_size=None, show_progress=True:
+  #      f"process_with_collector:{hash(str(items))}:{processor_func.__name__}:{collector_func.__name__}:{max_workers}:{batch_size}:{show_progress}")
 def process_with_collector(items: List[T], processor_func: Callable[[T], R], collector_func: Callable[[List[R]], Any], max_workers: Optional[int] = None, batch_size: Optional[int] = None, show_progress: bool = True) -> Any:
     """Convenience function to process items and collect results."""
     processor = BatchProcessor(max_workers, batch_size, show_progress)
