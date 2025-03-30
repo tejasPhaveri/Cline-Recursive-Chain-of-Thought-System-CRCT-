@@ -29,9 +29,9 @@ from cline_utils.dependency_system.core.dependency_grid import compress, create_
 import logging
 logger = logging.getLogger(__name__)
 
-@cached("tracker_paths",
-        key_func=lambda project_root, tracker_type="main", module_path=None:
-        f"tracker_path:{normalize_path(project_root)}:{tracker_type}:{normalize_path(module_path) if module_path else 'none'}:{os.path.getmtime(ConfigManager().config_path) if os.path.exists(ConfigManager().config_path) else 'missing'}")
+# @cached("tracker_paths",
+#         key_func=lambda project_root, tracker_type="main", module_path=None:
+#         f"tracker_path:{normalize_path(project_root)}:{tracker_type}:{normalize_path(module_path) if module_path else 'none'}:{os.path.getmtime(ConfigManager().config_path) if os.path.exists(ConfigManager().config_path) else 'missing'}")
 def get_tracker_path(project_root: str, tracker_type: str = "main", module_path: Optional[str] = None) -> str:
     """
     Get the path to the appropriate tracker file based on type. Ensures path uses forward slashes.
@@ -66,9 +66,9 @@ def get_tracker_path(project_root: str, tracker_type: str = "main", module_path:
 
 # --- Caching for read_tracker_file ---
 # The key needs to depend on the file modification time for the cache to be effective.
-@cached("tracker_data",
-        key_func=lambda tracker_path:
-        f"tracker_data:{normalize_path(tracker_path)}:{os.path.getmtime(tracker_path) if os.path.exists(tracker_path) else 'missing'}")
+# @cached("tracker_data",
+#         key_func=lambda tracker_path:
+#         f"tracker_data:{normalize_path(tracker_path)}:{os.path.getmtime(tracker_path) if os.path.exists(tracker_path) else 'missing'}")
 def read_tracker_file(tracker_path: str) -> Dict[str, Any]:
     """
     Read a tracker file and parse its contents. Caches based on path and mtime.

@@ -242,11 +242,11 @@ def check_file_modified(file_path: str) -> bool:
         cache.set(cache_key, current_timestamp)
         from .path_utils import get_file_type
         file_type = get_file_type(file_path)
-        file_modified(file_path, os.path.dirname(file_path), file_type)
+        # file_modified(file_path, os.path.dirname(file_path), file_type)
         return True
     return False
 
-@cached('file_type_cache', key_func=lambda file_path: f"file_type:{normalize_path(file_path)}:{os.path.getmtime(file_path) if os.path.exists(file_path) else 'missing'}")
+# @cached('file_type_cache', key_func=lambda file_path: f"file_type:{normalize_path(file_path)}:{os.path.getmtime(file_path) if os.path.exists(file_path) else 'missing'}")
 def get_file_type_cached(file_path: str) -> str:
     """Cached version of get_file_type."""
     from .path_utils import get_file_type

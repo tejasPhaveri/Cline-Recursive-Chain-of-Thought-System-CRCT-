@@ -80,6 +80,8 @@ def command_handler_analyze_project(args):
         # Analyze project now implicitly uses the new CWD if changed
         results = analyze_project(force_analysis=args.force_analysis, force_embeddings=args.force_embeddings)
 
+        logger.debug(f"All Suggestions before Tracker Update: {results.get('dependency_suggestion', {}).get('suggestions')}") # Log suggestions
+
         if args.output:
             output_path_abs = normalize_path(os.path.abspath(args.output))
             output_dir = os.path.dirname(output_path_abs)

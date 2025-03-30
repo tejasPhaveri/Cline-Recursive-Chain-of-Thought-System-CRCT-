@@ -118,8 +118,8 @@ def get_project_root() -> str:
     """
     from cline_utils.dependency_system.utils.cache_manager import cached
 
-    @cached("project_root",
-            key_func=lambda: f"project_root:{os.getcwd()}:{os.path.getmtime(os.getcwd())}")
+    # @cached("project_root",
+    #         key_func=lambda: f"project_root:{os.getcwd()}:{os.path.getmtime(os.getcwd())}")
     def _get_project_root() -> str:
         current_dir = os.path.abspath(os.getcwd())
         root_indicators = ['.git', '.clinerules', 'pyproject.toml', 'setup.py', 'package.json', 'Cargo.toml', 'CMakeLists.txt']

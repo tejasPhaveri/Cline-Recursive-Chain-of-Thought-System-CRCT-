@@ -3,6 +3,7 @@ Core module for key management.
 Handles key generation, validation, and sorting.
 """
 
+import glob
 import os
 import re
 from typing import Dict, List, Tuple, Optional, Set
@@ -122,31 +123,38 @@ def generate_keys(root_paths: List[str], excluded_dirs: Set[str] = None,
             item_path = os.path.join(dir_path, item_name)
             norm_item_path = normalize_path(item_path).replace("\\", "/")
 
-            # 2. Skip excluded item names within the current directory
+            # 2. Check against excluded file patterns (wildcards)
+            abs_item_path = os.path.join(dir_path, item_name)
+            excluded_paths = ConfigManager().get_excluded_paths() # Get configured excluded paths
+            if any(glob.has_magic(pattern) and glob.glob(pattern, root_dir=get_project_root(), recursive=True) and normalize_path(abs_item_path) in [normalize_path(fp) for fp in glob.glob(pattern, root_dir=get_project_root(), recursive=True)] or not glob.has_magic(pattern) and normalize_path(abs_item_path) == normalize_path(pattern) for pattern in excluded_paths):
+                logger.debug(f"Exclusion Check 2 (Wildcard Patterns): Skipping item '{item_name}' in '{norm_dir_path}' due to pattern match.")
+                continue
+
+            # 3. Skip excluded item names within the current directory
             # Relies solely on the set derived from config or args.
             # Also explicitly skip '.gitkeep' which isn't typically configured.
             if item_name in excluded_dirs_names or item_name == ".gitkeep":
-                logger.debug(f"Exclusion Check 2 (Item Name): Skipping item '{item_name}' in '{norm_dir_path}'")
+                logger.debug(f"Exclusion Check 3 (Item Name): Skipping item '{item_name}' in '{norm_dir_path}'")
                 continue
             else:
-                logger.debug(f"Exclusion Check 2 (Item Name): Processing item '{item_name}' in '{norm_dir_path}'")
+                logger.debug(f"Exclusion Check 3 (Item Name): Processing item '{item_name}' in '{norm_dir_path}'")
 
             # 3. Skip mini-tracker files by naming convention
             if item_name.endswith("_module.md"):
-                logger.debug(f"Exclusion Check 3 (Mini-Tracker Name): Skipping item '{item_name}' in '{norm_dir_path}'")
+                logger.debug(f"Exclusion Check 4 (Mini-Tracker Name): Skipping item '{item_name}' in '{norm_dir_path}'")
                 continue
             else:
                  # Proceed to extension check only if not skipped by name
-                logger.debug(f"Exclusion Check 3 (Mini-Tracker Name): Processing item '{item_name}' in '{norm_dir_path}'")
+                logger.debug(f"Exclusion Check 4 (Mini-Tracker Name): Processing item '{item_name}' in '{norm_dir_path}'")
 
                 # 4. Skip files with excluded extensions
                 _, ext = os.path.splitext(item_name)
                 if ext in excluded_extensions:
-                    logger.debug(f"Exclusion Check 4 (Extension): Skipping item '{item_name}' with extension '{ext}' in '{norm_dir_path}'")
+                    logger.debug(f"Exclusion Check 5 (Extension): Skipping item '{item_name}' with extension '{ext}' in '{norm_dir_path}'")
                     continue
                 # Only process or log processing if not skipped by extension
                 elif os.path.isfile(item_path):
-                    logger.debug(f"Exclusion Check 4 (Extension): Processing file item '{item_name}' with extension '{ext}' in '{norm_dir_path}'")
+                    logger.debug(f"Exclusion Check 5 (Extension): Processing file item '{item_name}' with extension '{ext}' in '{norm_dir_path}'")
                     file_key = f"{key}{file_count}" # Assign key only if it's a file to be processed
                     if file_key not in key_map:
                         key_map[file_key] = norm_item_path

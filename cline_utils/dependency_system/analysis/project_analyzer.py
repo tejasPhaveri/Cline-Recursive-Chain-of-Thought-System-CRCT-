@@ -18,8 +18,8 @@ from cline_utils.dependency_system.utils.path_utils import is_subpath, normalize
 logger = logging.getLogger(__name__)
 
 # @cached("project_analysis",
-#        key_func=lambda force_analysis=False, force_embeddings=False, **kwargs:
-#        f"analyze_project:{normalize_path(get_project_root())}:{os.path.getmtime(ConfigManager().config_path)}:{force_analysis}:{force_embeddings}")
+#         key_func=lambda force_analysis=False, force_embeddings=False, **kwargs:
+#         f"analyze_project:{normalize_path(get_project_root())}:{os.path.getmtime(ConfigManager().config_path)}:{force_analysis}:{force_embeddings}")
 def analyze_project(force_analysis: bool = False, force_embeddings: bool = False) -> Dict[str, Any]:
     """
     Analyzes all files in a project to identify dependencies between them,
