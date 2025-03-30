@@ -46,14 +46,16 @@ def get_file_type_for_key(file_path: str) -> str:
         return "generic"
 
 
-def generate_keys(root_paths: List[str], excluded_dirs: Set[str] = None,
-                 excluded_extensions: Set[str] = None) -> Tuple[Dict[str, str], List[str]]:
+def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = None,
+                 excluded_extensions: Optional[Set[str]] = None,
+                 precomputed_excluded_paths: Optional[Set[str]] = None) -> Tuple[Dict[str, str], List[str]]:
     """
     Generate hierarchical keys for files and directories.
     Args:
         root_paths: List of root directory paths to process
         excluded_dirs: Optional set of directory names to exclude
         excluded_extensions: Optional set of file extensions to exclude
+        precomputed_excluded_paths: Optional set of pre-calculated absolute paths to exclude (handles wildcards).
     Returns:
         Tuple containing:
         - Dictionary mapping hierarchical keys to file/directory paths
@@ -79,22 +81,36 @@ def generate_keys(root_paths: List[str], excluded_dirs: Set[str] = None,
     project_root = get_project_root()
     absolute_excluded_dirs = {normalize_path(os.path.join(project_root, d)) for d in excluded_dirs_names}
 
+    # Determine the final exclusion set
+    if precomputed_excluded_paths is not None:
+        # Use precomputed list (already handles wildcards) and combine with simple dir exclusions
+        exclusion_set_for_processing = precomputed_excluded_paths.union(absolute_excluded_dirs)
+        logger.debug(f"Using precomputed excluded paths combined with excluded dirs. Total: {len(exclusion_set_for_processing)}")
+    else:
+        # Fallback: Calculate wildcard paths now if not precomputed
+        logger.debug("Precomputed excluded paths not provided, calculating now...")
+        calculated_excluded_paths_list = config_manager.get_excluded_paths() # Returns a list
+        # Convert list to set before union
+        exclusion_set_for_processing = set(calculated_excluded_paths_list).union(absolute_excluded_dirs)
+        logger.debug(f"Calculated excluded paths combined with excluded dirs. Total: {len(exclusion_set_for_processing)}")
+
     dir_to_letter: Dict[str, str] = {}  # Tracks directory letters to avoid duplicates
     key_map: Dict[str, str] = {}  # Maps hierarchical keys to normalized paths
     new_keys: List[str] = []  # Tracks newly assigned keys
 
-    # Pass absolute_excluded_dirs down
-    def process_directory(dir_path: str, absolute_excluded_paths: Set[str], parent_key: str = None, tier: int = 1):
+    # Pass the final exclusion_set_for_processing down
+    def process_directory(dir_path: str, exclusion_set: Set[str], parent_key: str = None, tier: int = 1):
         """Recursively processes directories and files."""
         nonlocal dir_to_letter, key_map, new_keys
 
         norm_dir_path = normalize_path(dir_path) # Normalize once
-        # 1. Skip excluded directories using full path check
-        if any(norm_dir_path.startswith(ex_path) for ex_path in absolute_excluded_paths):
-            logger.debug(f"Exclusion Check 1 (Path Prefix): Skipping excluded dir path: '{norm_dir_path}'")
+        # 1. Skip excluded directories using the combined exclusion_set (handles prefixes and wildcards)
+        # Check if the normalized directory path starts with any path in the exclusion set
+        if any(norm_dir_path.startswith(ex_path) for ex_path in exclusion_set):
+            logger.debug(f"Exclusion Check 1 (Combined Set): Skipping excluded dir path: '{norm_dir_path}'")
             return
         else:
-            logger.debug(f"Exclusion Check 1 (Path Prefix): Processing dir path: '{norm_dir_path}'")
+            logger.debug(f"Exclusion Check 1 (Combined Set): Processing dir path: '{norm_dir_path}'")
 
         # Assign a letter to this directory if it's a top-level directory
         if parent_key is None:
@@ -123,12 +139,13 @@ def generate_keys(root_paths: List[str], excluded_dirs: Set[str] = None,
             item_path = os.path.join(dir_path, item_name)
             norm_item_path = normalize_path(item_path).replace("\\", "/")
 
-            # 2. Check against excluded file patterns (wildcards)
-            abs_item_path = os.path.join(dir_path, item_name)
-            excluded_paths = ConfigManager().get_excluded_paths() # Get configured excluded paths
-            if any(glob.has_magic(pattern) and glob.glob(pattern, root_dir=get_project_root(), recursive=True) and normalize_path(abs_item_path) in [normalize_path(fp) for fp in glob.glob(pattern, root_dir=get_project_root(), recursive=True)] or not glob.has_magic(pattern) and normalize_path(abs_item_path) == normalize_path(pattern) for pattern in excluded_paths):
-                logger.debug(f"Exclusion Check 2 (Wildcard Patterns): Skipping item '{item_name}' in '{norm_dir_path}' due to pattern match.")
-                continue
+            # REMOVED Redundant Check: The startswith check using exclusion_set handles this now.
+            # # 2. Check against excluded file patterns (wildcards)
+            # abs_item_path = os.path.join(dir_path, item_name)
+            # excluded_paths = ConfigManager().get_excluded_paths() # Get configured excluded paths - THIS WAS THE BOTTLENECK
+            # if any(glob.has_magic(pattern) and glob.glob(pattern, root_dir=get_project_root(), recursive=True) and normalize_path(abs_item_path) in [normalize_path(fp) for fp in glob.glob(pattern, root_dir=get_project_root(), recursive=True)] or not glob.has_magic(pattern) and normalize_path(abs_item_path) == normalize_path(pattern) for pattern in excluded_paths):
+            #     logger.debug(f"Exclusion Check 2 (Wildcard Patterns): Skipping item '{item_name}' in '{norm_dir_path}' due to pattern match.")
+            #     continue
 
             # 3. Skip excluded item names within the current directory
             # Relies solely on the set derived from config or args.
@@ -167,12 +184,12 @@ def generate_keys(root_paths: List[str], excluded_dirs: Set[str] = None,
                         key_map[subdir_key] = norm_item_path
                         new_keys.append(subdir_key)  # Record new key
                     subdir_count += 1
-                    # Pass absolute_excluded_paths in recursive call
-                    process_directory(item_path, absolute_excluded_paths, subdir_key, tier + 1)
+                    # Pass the same combined exclusion_set in recursive call
+                    process_directory(item_path, exclusion_set, subdir_key, tier + 1)
 
     for root_path in root_paths:
-        # Pass absolute_excluded_dirs to initial call
-        process_directory(root_path, absolute_excluded_dirs)
+        # Pass the final exclusion_set_for_processing to initial call
+        process_directory(root_path, exclusion_set_for_processing)
 
     # Generate initial suggestions after processing all directories
     from cline_utils.dependency_system.analysis.dependency_suggester import suggest_initial_dependencies
@@ -250,9 +267,11 @@ def regenerate_keys(root_paths: List[str], excluded_dirs: Set[str] = None,
         Tuple containing:
         - Dictionary mapping hierarchical keys to file/directory paths
         - List of newly assigned keys
-        - Dictionary of initial dependency suggestions (directory <-> file)
-        - Dictionary mapping file paths to their module path (for mini-trackers)
+        - Dictionary of initial dependency suggestions (directory <-> file) # Note: initial suggestions are now empty due to previous change
     """
+    # Note: This regenerate function doesn't handle the new precomputed_excluded_paths parameter.
+    # If regeneration is needed with precomputed paths, this function would need updating or
+    # the caller should use generate_keys directly.
     return generate_keys(root_paths, excluded_dirs, excluded_extensions)
 
 # EoF

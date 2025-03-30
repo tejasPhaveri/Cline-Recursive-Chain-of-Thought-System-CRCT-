@@ -57,8 +57,8 @@ def get_file_type(file_path: str) -> str:
         "css": "css"
     }.get(ext, "generic")
 
-# @cached("file_analysis",
-#        key_func=lambda file_path: f"analyze_file:{normalize_path(file_path)}:{os.path.getmtime(file_path) if os.path.exists(file_path) else 'missing'}:{os.path.getmtime(ConfigManager().config_path)}")
+@cached("file_analysis",
+       key_func=lambda file_path: f"analyze_file:{normalize_path(file_path)}:{os.path.getmtime(file_path) if os.path.exists(file_path) else 'missing'}:{os.path.getmtime(ConfigManager().config_path)}")
 def analyze_file(file_path: str) -> Dict[str, Any]:
     """
     Analyzes a file to identify dependencies, imports, and other metadata.

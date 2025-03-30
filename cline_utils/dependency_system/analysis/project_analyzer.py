@@ -82,8 +82,8 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
 
     # Generate keys for ALL relevant files first
     try:
-        # generate_keys expects relative paths from project root
-        key_map, new_keys, initial_suggestions = generate_keys(all_roots)
+        # Pass precomputed list of excluded paths (absolute) to generate_keys
+        key_map, new_keys, initial_suggestions = generate_keys(all_roots, precomputed_excluded_paths=set(all_excluded_paths))
         results["tracker_initialization"]["key_generation"] = "success"
         logger.info(f"Generated {len(key_map)} keys.")
     except Exception as e:

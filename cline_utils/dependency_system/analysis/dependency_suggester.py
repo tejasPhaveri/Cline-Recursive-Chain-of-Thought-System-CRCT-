@@ -620,9 +620,10 @@ def suggest_initial_dependencies(key_map: Dict[str, str]) -> Dict[str, List[Tupl
     for key, path in key_map.items():
         parent_dir = os.path.dirname(path)
         parent_key = path_to_key.get(parent_dir)
-        if parent_key and parent_key != key:
-            suggestions[key].append((parent_key, "x"))
-            suggestions[parent_key].append((key, "x"))
+        # Removed initial 'x' suggestion for parent-child directory relationships as per activeContext.md Next Step 1
+        # if parent_key and parent_key != key:
+        #     suggestions[key].append((parent_key, "x"))
+        #     suggestions[parent_key].append((key, "x"))
     return suggestions
 
 # End of file
