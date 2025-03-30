@@ -498,8 +498,10 @@ def _write_key_definitions(file_obj: io.TextIOBase, key_map: Dict[str, str]):
     """Writes the key definitions section to the file object."""
     file_obj.write("---KEY_DEFINITIONS_START---\n")
     file_obj.write("Key Definitions:\n")
-    # Sort keys before writing
-    for k, v in sorted(key_map.items(), key=lambda item: sort_keys([item[0]])):
+    # Explicitly sort keys using the canonical sort_keys function first
+    sorted_keys_list = sort_keys(list(key_map.keys()))
+    for k in sorted_keys_list:
+        v = key_map[k] # Get value from the original map
         file_obj.write(f"{k}: {normalize_path(v)}\n") # Write normalized path
     file_obj.write("---KEY_DEFINITIONS_END---\n")
 
@@ -548,6 +550,11 @@ def create_mini_tracker(module_path: str,
 
     # Use relevant_keys_for_grid and the GLOBAL map to get paths for ALL keys in the grid definitions
     keys_to_write_defs = {k: global_key_map.get(k, "PATH_NOT_FOUND_IN_GLOBAL_MAP") for k in relevant_keys_for_grid}
+
+    # Ensure module's own key is always included
+    module_key = get_key_from_path(module_path, global_key_map)
+    if module_key and module_key not in relevant_keys_for_grid:
+        relevant_keys_for_grid.append(module_key)
 
     # Grid dimensions are based on relevant_keys_for_grid
     sorted_relevant_keys_list = sort_keys(relevant_keys_for_grid)
@@ -819,6 +826,16 @@ def update_tracker(output_file: str, # Note: output_file might be recalculated i
                              final_last_grid_edit = f"Applied suggestion: {row_key} -> {col_key} ({dep_char})"
                         # else: logger.debug(f"Skipping suggestion {row_key}->{col_key}; Attempted to overwrite diagonal.") # Optional debug
                     # else: logger.debug(f"Suggestion {row_key}->{col_key} ({dep_char}) matches existing character. No change.")
+
+                    # --- ADD WARNING for mismatch on non-placeholder ---
+                    elif existing_char != PLACEHOLDER_CHAR and existing_char != dep_char:
+                        # Log a warning if the suggestion differs from a non-placeholder character
+                        warning_msg = f"Suggestion Conflict in {os.path.basename(output_file)}: For {row_key}->{col_key}, grid has '{existing_char}', suggestion is '{dep_char}'. Manual review recommended."
+                        logger.warning(warning_msg)
+                        # <<< ADDED: Print warning directly to terminal >>>
+                        print(f"WARNING: {warning_msg}")
+                    # else: # Existing char is not placeholder and matches suggestion, or suggestion is invalid - no action/log needed
+                    #    logger.debug(f"Suggestion {row_key}->{col_key} ({dep_char}) matches existing character '{existing_char}' or not applied. No change.")
                 except (ValueError, IndexError) as e:
                      logger.error(f"Error applying suggestion {row_key}->{col_key} in {output_file}: {e}")
 

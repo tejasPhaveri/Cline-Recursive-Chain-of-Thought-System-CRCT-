@@ -113,7 +113,8 @@ DEFAULT_CONFIG = {
     },
     "excluded_paths": [
 
-    ]
+    ],
+    "allowed_dependency_chars": ['<', '>', 'x', 'd', 's', 'S']
 }
 
 class ConfigManager:
@@ -388,6 +389,11 @@ class ConfigManager:
             return [normalize_path(d) for d in doc_dirs]
 
         return _get_doc_directories(self)
+
+    def get_allowed_dependency_chars(self) -> List[str]:
+        """Get the allowed dependency characters from configuration."""
+        # Correctly fetch from the config dictionary, falling back to default
+        return self.config.get("allowed_dependency_chars", DEFAULT_CONFIG["allowed_dependency_chars"])
 
     def update_config(self, updates: Dict[str, Any]) -> bool:
         """

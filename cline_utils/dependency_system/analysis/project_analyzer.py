@@ -285,14 +285,14 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
         for key, path in key_map.items():
             norm_path = normalize_path(path)
             if os.path.isdir(norm_path) and any(is_subpath(norm_path, code_root) for code_root in abs_code_roots):
-                mini_tracker_path = get_tracker_path(project_root, tracker_type="mini", module_path=norm_path) # Use normalized path
-                logger.info(f"Updating mini tracker: {mini_tracker_path}")
-                # Pass all_suggestions; update_tracker filters using module_path ('norm_path')
-                update_tracker(mini_tracker_path, key_map, tracker_type="mini", suggestions=all_suggestions, file_to_module=file_to_module, new_keys=new_keys)
-                results["tracker_update"]["mini"][key] = "success" # Use the directory's key
-
-        logger.info("Tracker updates completed.")
-
+                if not _is_empty_dir(norm_path): # Check if directory is NOT empty
+                    mini_tracker_path = get_tracker_path(project_root, tracker_type="mini", module_path=norm_path) # Use normalized path
+                    logger.info(f"Updating mini tracker: {mini_tracker_path}")
+                    # Pass all_suggestions; update_tracker filters using module_path ('norm_path')
+                    update_tracker(mini_tracker_path, key_map, tracker_type="mini", suggestions=all_suggestions, file_to_module=file_to_module, new_keys=new_keys)
+                    results["tracker_update"]["mini"][key] = "success" # Use the directory's key
+                else:
+                    logger.debug(f"Skipping mini-tracker creation for empty directory: {norm_path}")
     except Exception as e:
         results["status"] = "error"
         results["message"] = f"Dependency suggestion or tracker update failed: {e}"
@@ -302,5 +302,9 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     print("Project analysis completed.") # Changed from logger.info to print for user visibility
     results["message"] = "Project analysis completed successfully." # Add success message
     return results
-
+def _is_empty_dir(dir_path: str) -> bool:
+    """
+    Checks if a directory is empty (contains no files or subdirectories).
+    """
+    return not os.listdir(dir_path)
 # --- End of project_analyzer.py modifications ---

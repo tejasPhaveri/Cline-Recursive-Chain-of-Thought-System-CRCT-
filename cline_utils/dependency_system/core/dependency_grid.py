@@ -9,6 +9,7 @@ from typing import Dict, List, Tuple, Optional
 
 # Import only from utils
 from cline_utils.dependency_system.utils.cache_manager import cached, invalidate_dependent_entries, clear_all_caches
+from cline_utils.dependency_system.utils.config_manager import ConfigManager
 from .key_manager import validate_key
 
 import logging
@@ -290,40 +291,67 @@ def remove_dependency_from_grid(grid: Dict[str, str], source_key: str, target_ke
     invalidate_dependent_entries('grid_validation', f"validate_grid:{hash(str(sorted(new_grid.items())))}:{':'.join(keys)}")
     return new_grid
 
-@cached("grid_dependencies",
-        key_func=lambda grid, key, keys, direction="outgoing":
-        f"dependencies:{hash(str(sorted(grid.items())))}:{key}:{direction}")
-def get_dependencies_from_grid(grid: Dict[str, str], key: str, keys: List[str],
-                              direction: str = "outgoing") -> List[str]:
+from collections import defaultdict # <<< ADD IMPORT
+
+# Remove caching for now as the return type and logic are changing significantly
+# @cached("grid_dependencies", ...)
+def get_dependencies_from_grid(grid: Dict[str, str], key: str, keys: List[str]) -> Dict[str, List[str]]:
     """
-    Get dependencies for a specific key in the grid.
+    Get dependencies for a specific key, categorized by relationship type.
 
     Args:
         grid: Dictionary mapping keys to compressed dependency strings
         key: Key to get dependencies for
-        keys: List of keys for index mapping
-        direction: 'outgoing' for dependencies this key has, 'incoming' for keys that depend on this
+        keys: List of keys for index mapping (MUST be in canonical sort order)
 
     Returns:
-        List of dependent keys
+        Dictionary mapping dependency characters ('<', '>', 'x', 'd', 's', 'S', 'p')
+        to lists of related keys.
     """
     if key not in keys:
         raise ValueError(f"Key {key} not in keys list")
 
-    dependencies = []
+    results = defaultdict(set)
     key_idx = keys.index(key)
+    defined_dep_chars = {'<', '>', 'x', 'd', 's', 'S'} # Characters indicating a defined relationship
 
-    if direction == "outgoing":
-        row = decompress(grid.get(key, PLACEHOLDER_CHAR * len(keys)))  # Uses cached decompress
-        for i, char in enumerate(row):
-            if i != key_idx and char not in (EMPTY_CHAR, PLACEHOLDER_CHAR):
-                dependencies.append(keys[i])
-    else:  # incoming
-        for row_key in keys:
-            row = decompress(grid.get(row_key, PLACEHOLDER_CHAR * len(keys)))  # Uses cached decompress
-            if row[key_idx] not in (EMPTY_CHAR, PLACEHOLDER_CHAR, DIAGONAL_CHAR):
-                dependencies.append(row_key)
-    return dependencies
+    for i, other_key in enumerate(keys):
+        if key == other_key:
+            continue # Skip self
+
+        # Determine the relationship character in both directions
+        char_outgoing = EMPTY_CHAR # Default if row missing
+        row_key_compressed = grid.get(key)
+        if row_key_compressed:
+            try:
+                char_outgoing = get_char_at(row_key_compressed, i)
+            except IndexError: pass # Ignore if index out of bounds for this row
+
+        # Categorize based on characters (prioritize defined relationships over placeholders)
+        # Note: Symmetric checks ('x', 'd', 's', 'S') list the other key if *either* direction shows the char.
+        # Directional checks ('>', '<') only consider the specific direction.
+        # Placeholders ('p') are only listed if neither direction has a defined relationship.
+
+        if char_outgoing == 'x':
+            results['x'].add(other_key)
+        elif char_outgoing == 'd':
+             results['d'].add(other_key)
+        elif char_outgoing == 'S':
+             results['S'].add(other_key)
+        elif char_outgoing == 's':
+             results['s'].add(other_key)
+        # Directional check AFTER symmetric checks
+        elif char_outgoing == '>':
+             results['>'].add(other_key)
+        elif char_outgoing == '<':
+             results['<'].add(other_key)             
+        # Placeholder check LAST - only if no defined relationship exists in EITHER direction
+        elif char_outgoing not in defined_dep_chars:
+             if char_outgoing == 'p':
+                 results['p'].add(other_key)
+
+    # Convert sets to lists for the final output
+    return {k: list(v) for k, v in results.items()}
 
 def format_grid_for_display(grid: Dict[str, str], keys: List[str]) -> str:
     """

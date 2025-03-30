@@ -4,15 +4,17 @@ Processes command-line arguments and delegates to appropriate handlers.
 """
 
 import argparse
+from collections import defaultdict
 import logging
 import os
 import sys
+import re # <<< ADDED IMPORT
 
 from cline_utils.dependency_system.analysis.project_analyzer import analyze_project
 
 from cline_utils.dependency_system.core.dependency_grid import compress, decompress, get_char_at, set_char_at, add_dependency_to_grid
 from cline_utils.dependency_system.io.tracker_io import remove_file_from_tracker, merge_trackers, read_tracker_file, write_tracker_file, export_tracker
-from cline_utils.dependency_system.utils.path_utils import get_project_root, normalize_path
+from cline_utils.dependency_system.utils.path_utils import get_project_root, normalize_path, KEY_PATTERN # <<< MODIFIED IMPORT
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
 from cline_utils.dependency_system.utils.cache_manager import clear_all_caches, file_modified
 from cline_utils.dependency_system.analysis.dependency_analyzer import analyze_file
@@ -353,23 +355,25 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
 
     # --- Gather all tracker paths ---
     all_tracker_paths = set()
-    # 1. Get main and doc trackers from config using get_path()
-    # These paths are relative to project root as returned by get_path
-    main_tracker_rel = config.get_path('main_tracker_path')
-    doc_tracker_rel = config.get_path('doc_tracker_path')
+    memory_dir_rel = config.get_path('memory_dir') # Get memory_dir from config
+    if not memory_dir_rel:
+        logger.error("Memory directory path ('memory_dir') not configured in .clinerules.config.json")
+        print("Error: Memory directory path ('memory_dir') not configured. Check .clinerules.config.json and debug.txt.")
+        return 1 # Early exit if config is missing
+    memory_dir_abs = normalize_path(os.path.join(project_root, memory_dir_rel))
 
-    if main_tracker_rel:
-        main_tracker_abs = normalize_path(os.path.join(project_root, main_tracker_rel))
-        if os.path.exists(main_tracker_abs):
-            all_tracker_paths.add(main_tracker_abs)
-        else:
-            logger.warning(f"Main tracker path from config not found: {main_tracker_abs}")
-    if doc_tracker_rel:
-        doc_tracker_abs = normalize_path(os.path.join(project_root, doc_tracker_rel))
-        if os.path.exists(doc_tracker_abs):
-            all_tracker_paths.add(doc_tracker_abs)
-        else:
-            logger.warning(f"Doc tracker path from config not found: {doc_tracker_abs}")
+    # 1. Construct main and doc tracker paths dynamically
+    main_tracker_abs = normalize_path(os.path.join(memory_dir_abs, 'module_relationship_tracker.md'))
+    doc_tracker_abs = normalize_path(os.path.join(memory_dir_abs, 'doc_tracker.md'))
+
+    if os.path.exists(main_tracker_abs):
+        all_tracker_paths.add(main_tracker_abs)
+    else:
+        logger.warning(f"Main tracker path not found: {main_tracker_abs}")
+    if os.path.exists(doc_tracker_abs):
+        all_tracker_paths.add(doc_tracker_abs)
+    else:
+        logger.warning(f"Doc tracker path not found: {doc_tracker_abs}")
 
     # 2. Find mini-trackers (*_module.md) in code roots
     # get_code_root_directories already returns normalized paths relative to project_root
@@ -398,97 +402,102 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
     outgoing_deps = set() # Using set to store (key, path) tuples for auto-deduplication
     incoming_deps = set()
     key_found_in_any_tracker = False
+    master_key_map = {} # Aggregate all key definitions found across trackers
+    all_dependencies_by_type = defaultdict(set) # Store sets of (key, path) tuples
 
+    # First pass: Aggregate all key definitions
     for tracker_path in all_tracker_paths:
         try:
-            logger.debug(f"Reading tracker: {tracker_path}")
+            logger.debug(f"Reading tracker for key map: {tracker_path}")
             tracker_data = read_tracker_file(tracker_path)
-            if not tracker_data or not tracker_data.get("keys"):
-                logger.warning(f"Skipping invalid or empty tracker: {tracker_path}")
+            if tracker_data and tracker_data.get("keys"):
+                master_key_map.update(tracker_data["keys"]) # Add/overwrite keys
+        except Exception as e:
+            logger.error(f"Failed to read tracker {tracker_path} for key map: {e}", exc_info=True)
+            # Continue processing other trackers
+
+    if not master_key_map:
+        print("Error: No valid key definitions found in any tracker file.")
+        return 1
+
+    # Second pass: Find dependencies using the master map for path lookups
+    for tracker_path in all_tracker_paths:
+        try:
+            logger.debug(f"Reading tracker for dependencies: {tracker_path}")
+            tracker_data = read_tracker_file(tracker_path)
+            if not tracker_data or not tracker_data.get("keys") or not tracker_data.get("grid"):
+                logger.warning(f"Skipping tracker with missing keys or grid: {tracker_path}")
                 continue
 
             key_map = tracker_data["keys"]
-            grid = tracker_data.get("grid", {})
-            sorted_keys = list(key_map.keys()) # Need the list of keys for indexing
+            grid = tracker_data["grid"]
+            # Use canonical sort order for keys *within this specific tracker*
+            sorted_keys_local = sort_keys(list(key_map.keys()))
 
             if target_key in key_map:
                 key_found_in_any_tracker = True
-                logger.debug(f"Key '{target_key}' found in {tracker_path}")
-
-                # Get outgoing dependencies
+                logger.debug(f"Key '{target_key}' found in {tracker_path}, analyzing grid.")
                 try:
-                    outgoing_keys = get_dependencies_from_grid(grid, target_key, sorted_keys, direction="outgoing")
-                    for dep_key in outgoing_keys:
-                        if dep_key in key_map: # Ensure key exists in this tracker's map
-                             outgoing_deps.add((dep_key, key_map[dep_key]))
-                        else:
-                             logger.warning(f"Outgoing dependency key '{dep_key}' listed in grid but not in key map for {tracker_path}")
+                    # Call the refactored get_dependencies_from_grid
+                    # Pass the grid, target key, and the canonically sorted keys for THIS tracker
+                    deps_from_this_grid = get_dependencies_from_grid(grid, target_key, sorted_keys_local)
+
+                    # Merge results into the main dictionary, using the master_key_map for paths
+                    for dep_type, key_list in deps_from_this_grid.items():
+                        for dep_key in key_list:
+                            dep_path = master_key_map.get(dep_key, "PATH_NOT_FOUND") # Lookup path in aggregated map
+                            all_dependencies_by_type[dep_type].add((dep_key, dep_path))
 
                 except ValueError as e:
-                     logger.error(f"Error getting outgoing dependencies for {target_key} in {tracker_path}: {e}")
+                    logger.error(f"Error processing dependencies for {target_key} in {tracker_path}: {e}")
                 except Exception as e:
-                     logger.error(f"Unexpected error getting outgoing dependencies for {target_key} in {tracker_path}: {e}", exc_info=True)
+                    logger.error(f"Unexpected error processing dependencies for {target_key} in {tracker_path}: {e}", exc_info=True)
 
-
-                # Get incoming dependencies
-                try:
-                    incoming_keys = get_dependencies_from_grid(grid, target_key, sorted_keys, direction="incoming")
-                    for dep_key in incoming_keys:
-                         if dep_key in key_map: # Ensure key exists in this tracker's map
-                             incoming_deps.add((dep_key, key_map[dep_key]))
-                         else:
-                             logger.warning(f"Incoming dependency key '{dep_key}' listed in grid but not in key map for {tracker_path}")
-
-                except ValueError as e:
-                     logger.error(f"Error getting incoming dependencies for {target_key} in {tracker_path}: {e}")
-                except Exception as e:
-                     logger.error(f"Unexpected error getting incoming dependencies for {target_key} in {tracker_path}: {e}", exc_info=True)
-
-            # else: key not in this specific tracker, continue searching others
-
-        except FileNotFoundError:
-            logger.error(f"Tracker file not found during processing: {tracker_path}")
         except Exception as e:
-            logger.error(f"Failed to read or process tracker {tracker_path}: {e}", exc_info=True)
+            logger.error(f"Failed to read or process tracker {tracker_path} during dependency aggregation: {e}", exc_info=True)
             print(f"Warning: Error processing {tracker_path}. See debug.txt for details.")
-
 
     # --- Print results ---
     if not key_found_in_any_tracker:
          print(f"Error: Key '{target_key}' not found in any processed tracker file.")
          return 1
 
-    # Attempt to get the primary path definition for the target key for the header
-    target_path_str = " (Path definition not found)"
-    for tracker_path in all_tracker_paths:
-         try:
-             tracker_data = read_tracker_file(tracker_path)
-             if tracker_data and target_key in tracker_data.get("keys", {}):
-                 target_path_str = f" ({tracker_data['keys'][target_key]})"
-                 break
-         except: # Ignore errors here, just trying to get path for display
-             pass
-
-
+    target_path_str = f" ({master_key_map.get(target_key, 'Path definition not found')})"
     print(f"\n--- Dependencies for Key: {target_key}{target_path_str} ---")
 
-    print("\nDepends on (Outgoing):")
-    if outgoing_deps:
-        # Sort for consistent output
-        sorted_outgoing = sorted(list(outgoing_deps), key=lambda item: item[0])
-        for dep_key, dep_path in sorted_outgoing:
-            print(f"  - {dep_key}: {dep_path}")
-    else:
-        print("  None")
+    # Helper function to generate the actual sort key for hierarchical comparison
+    def _hierarchical_sort_key_func(key_str: str):
+        """Mimics the core logic of key_manager.sort_keys for a single key."""
+        if not key_str: return [] # Handle empty strings if they somehow occur
+        # Use the imported KEY_PATTERN
+        parts = re.findall(KEY_PATTERN, key_str)
+        # Convert numeric parts to integers for proper sorting
+        return [int(p) if p.isdigit() else p for p in parts]
 
-    print("\nDepended on by (Incoming):")
-    if incoming_deps:
-         # Sort for consistent output
-        sorted_incoming = sorted(list(incoming_deps), key=lambda item: item[0])
-        for dep_key, dep_path in sorted_incoming:
-            print(f"  - {dep_key}: {dep_path}")
-    else:
-        print("  None")
+    # Define output sections and corresponding characters
+    # Using definitions from .clinerules
+    output_sections = [
+        ("Mutual ('x')", 'x'),
+        ("Documentation ('d')", 'd'),
+        ("Semantic (Strong) ('S')", 'S'),
+        ("Semantic (Weak) ('s')", 's'),
+        ("Depends On ('<')", '<'),      # Target depends ON listed key
+        ("Depended On By ('>')", '>'), # Listed key depends ON target
+        ("Placeholders ('p')", 'p')
+    ]
+
+    for section_title, dep_char in output_sections:
+        print(f"\n{section_title}:")
+        dep_set = all_dependencies_by_type.get(dep_char)
+        if dep_set:
+            # Sort for consistent output using the helper function
+            # Apply the sort key function to the actual key (item[0])
+            sorted_deps = sorted(list(dep_set), key=lambda item: _hierarchical_sort_key_func(item[0]))
+            for dep_key, dep_path in sorted_deps:
+                logger.debug(f"Printing dependency: {(dep_key, dep_path)}") # <<< ADD DEBUG LOGGING
+                print(f"  - {dep_key}: {dep_path}")
+        else:
+            print("  None")
 
     print("\n------------------------------------------")
 
