@@ -44,11 +44,15 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
         "embedding_generation": {},
         "dependency_suggestion": {},
         "tracker_update": {},
-        "file_analysis": {}  # Added to store file analysis results
+        "file_analysis": {}
     }
 
-    excluded_paths = [normalize_path(os.path.join(project_root, p)) for p in config.get_excluded_dirs()] # Normalize excluded paths
-    if any(normalize_path(project_root).startswith(excluded_path) for excluded_path in excluded_paths):
+    # Combine excluded_dirs and excluded_paths
+    excluded_dirs = [normalize_path(os.path.join(project_root, p)) for p in config.get_excluded_dirs()]
+    excluded_paths = config.get_excluded_paths()  # Get specific excluded paths
+    all_excluded_paths = excluded_dirs + excluded_paths  # Combine both lists
+
+    if any(normalize_path(project_root).startswith(excluded_path) for excluded_path in all_excluded_paths):
         logger.info(f"Skipping analysis of excluded project root: {project_root}")
         results["status"] = "skipped"
         results["message"] = "Project root is excluded"
@@ -93,8 +97,9 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     for root_dir_rel in all_roots:
         abs_root_dir = normalize_path(os.path.join(project_root, root_dir_rel))
         for root, _, files in os.walk(abs_root_dir):
-             # Basic exclusion check during walk (can be refined with _is_valid_file logic)
-            if any(normalize_path(root).startswith(excluded_path) for excluded_path in excluded_paths):
+            # Check against all excluded paths (dirs and specific paths)
+            if any(normalize_path(root).startswith(excluded_path) for excluded_path in all_excluded_paths):
+                logger.debug(f"Skipping excluded directory: {root}")
                 continue
             for file in files:
                 files_to_analyze_abs.append(normalize_path(os.path.join(root, file)))

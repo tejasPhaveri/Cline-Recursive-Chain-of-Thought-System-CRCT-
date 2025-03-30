@@ -112,7 +112,8 @@ DEFAULT_CONFIG = {
         "backups_dir": "cline_docs/backups",
     },
     "excluded_paths": [
-
+        "src/node_modules",
+        "src/client/node_modules"
     ],
     "allowed_dependency_chars": ['<', '>', 'x', 'd', 's', 'S']
 }
@@ -278,6 +279,28 @@ class ConfigManager:
             return self.config.get("excluded_extensions", DEFAULT_CONFIG["excluded_extensions"])
 
         return _get_excluded_extensions(self)
+
+    def get_excluded_paths(self) -> List[str]:
+        """
+        Get list of excluded paths from configuration.
+        
+        Returns:
+            List of excluded path patterns or absolute paths
+        """
+        from .cache_manager import cached
+
+        @cached("excluded_paths",
+                key_func=lambda self: f"excluded_paths:{os.path.getmtime(self.config_path) if os.path.exists(self.config_path) else 'missing'}")
+        def _get_excluded_paths(self) -> List[str]:
+            # Retrieve excluded_paths from config, defaulting to DEFAULT_CONFIG value
+            excluded_paths = self.config.get("excluded_paths", DEFAULT_CONFIG["excluded_paths"])
+            # Normalize all paths relative to project root
+            project_root = get_project_root()
+            return [normalize_path(os.path.join(project_root, p)) if not os.path.isabs(p) else normalize_path(p) 
+                    for p in excluded_paths]
+
+        return _get_excluded_paths(self)
+
 
     def get_threshold(self, threshold_type: str) -> float:
         """
