@@ -124,6 +124,19 @@ DEFAULT_CONFIG = {
     ]              # <-- END ADDED SECTION
 }
 
+# Define character priorities (Higher number = higher priority) - Centralized definition
+# Conforms to the existing convention in dependency_suggester.py
+CHARACTER_PRIORITIES = {
+    'x': 5,
+    '<': 4, '>': 4,
+    'S': 3,
+    's': 2, 'd': 2,
+    'n': 1, 'p': 1, 'o': 1,
+    '-': 0, # Placeholder_char (Assign lowest numeric priority > 0)
+    ' ': 0  # Empty_char
+}
+DEFAULT_PRIORITY = 0 # Default for unknown characters (lowest priority)
+
 class ConfigManager:
     """
     Configuration manager for dependency tracking system.
@@ -479,3 +492,17 @@ class ConfigManager:
         """
         self._config = DEFAULT_CONFIG.copy()
         return self._save_config()
+
+    def get_char_priority(self, char: str) -> int:
+        """
+        Get the priority tier for a given dependency character.
+        Higher numbers indicate higher priority.
+
+        Args:
+            char: The dependency character.
+
+        Returns:
+            The priority tier (integer).
+        """
+        # Uses the centrally defined dictionary
+        return CHARACTER_PRIORITIES.get(char, DEFAULT_PRIORITY)
