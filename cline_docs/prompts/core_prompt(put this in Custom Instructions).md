@@ -28,7 +28,7 @@ This outlines the fundamental principles, required files, workflow structure, an
 - **Phase-First Sequential Workflow**: Operate in sequence: Set-up/Maintenance, Strategy, Execution. Begin by reading `.clinerules` to determine the current phase and load the relevant plugin instructions. Complete Set-up/Maintenance before proceeding.
 - **Chain-of-Thought Reasoning**: Generate clear reasoning, strategy, and reflection for each step.
 - **Mandatory Validation**: Always validate planned actions against the current file system state before changes.
-- **Proactive Code Root Identification**: The system must intelligently identify and differentiate project code directories from other directories (documentation, third-party libraries, etc.). This is done during **Set-up/Maintenance**. Identified code root directories are stored in `.clinerules`.
+- **Proactive Doc and Code Root Identification**: The system must intelligently identify and differentiate project documentation and code directories from other directories (documentation, third-party libraries, etc.). This is done during **Set-up/Maintenance**. Identified doc and code root directories are stored in `.clinerules`.
 - **Hierarchical Documentation:** Utilize the Hierarchical Design Token Architecture (HDTA) for project planning, organizing information into System Manifest, Domain Modules, Implementation Plans, and Task Instructions.
 
 ---
@@ -50,7 +50,7 @@ These files form the project foundation. *Must be loaded at initialization.* If 
 - `{memory_dir}` (e.g., `cline_docs/`) is for operational memory; `{doc_dir}` (e.g., `docs/`) is for project documentation. A "module" is a top-level directory within the project code root(s).
 - **For tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers), do *not* create or modify manually. Always use the `dependency_processor.py` script as specified to ensure correct format and data consistency.**
 - For other files, create manually with minimal content if needed (e.g., a title or basic structure).
-- Replace `src tests` and `docs` with actual paths from `[CODE_ROOT_DIRECTORIES]` in `.clinerules` or your documentation directory, respectively.
+- Replace `src tests` and `docs` with actual paths from `[CODE_ROOT_DIRECTORIES]` and `[DOC_DIRECTORIES]` in `.clinerules`.
 
 **`.clinerules` File Format (Example):**
 
@@ -58,7 +58,7 @@ These files form the project foundation. *Must be loaded at initialization.* If 
 [LAST_ACTION_STATE]
 last_action: "System Initialized"
 current_phase: "Set-up/Maintenance"
-next_action: "Identify Code Root Directories"
+next_action: "Identify Code Root and Documentation Directories"
 next_phase: "Set-up/Maintenance"
 
 [CODE_ROOT_DIRECTORIES]
@@ -68,6 +68,7 @@ next_phase: "Set-up/Maintenance"
 
 [DOC_DIRECTORIES]
 - docs
+- documentation
 
 [LEARNING_JOURNAL]
 - Regularly updating {memory_dir} and any instruction files help me to remember what I have done and what still needs to be done so I don't lose track.
@@ -83,7 +84,7 @@ next_phase: "Set-up/Maintenance"
 Proceed through the recursive loop, starting with the phase indicated by `.clinerules`.
 
 1. **Phase: Set-up/Maintenance or Resume Current Phase** (See Set-up/Maintenance Plugin for detailed procedures)
-   - **1.3 Identify Code Root Directories (if not already identified):** If the `[CODE_ROOT_DIRECTORIES]` section in `.clinerules` is empty or does not exist, follow the procedure outlined in Section XI to identify and store code root directories. *This is a critical part of initial Set-up/Maintenance.*
+   - **1.3 Identify Doc and Code Root Directories (if not already identified):** If the `[CODE_ROOT_DIRECTORIES]` or `[DOC_DIRECTORIES]` sections in `.clinerules` are empty or do not exist, follow the procedure outlined in Sections X and XI to identify and store doc and code root directories. *This is a critical part of initial Set-up/Maintenance.*
 2. Task Initiation
 3. Strategy Phase (See Strategy Plugin)
 4. Action & Documentation Phase (See Execution Plugin)
@@ -92,7 +93,7 @@ Proceed through the recursive loop, starting with the phase indicated by `.cline
 
 ### Phase Transition Checklist
 Before switching phases:
-- **Set-up/Maintenance → Strategy**: Confirm `doc_tracker.md` and `module_relationship_tracker.md` have no 'p' placeholders, and that `[CODE_ROOT_DIRECTORIES]` is populated in `.clinerules`.
+- **Set-up/Maintenance → Strategy**: Confirm `doc_tracker.md` and `module_relationship_tracker.md` have no 'p' placeholders, and that `[CODE_ROOT_DIRECTORIES]` and `[DOC_DIRECTORIES]` are populated in `.clinerules`.
 - **Strategy → Execution**: Verify instruction files contain complete "Steps" and "Dependencies" sections.
 
 Refer to the workflow diagram below and plugin instructions for details.
@@ -286,7 +287,27 @@ This process is part of the Set-up/Maintenance phase and is performed if the `[C
 
 ---
 
-## XI. Hierarchical Design Token Architecture (HDTA)
+## XI. Identifying Documentation Directories
+
+This process is part of the Set-up/Maintenance phase and should be performed alongside identifying code root directories.
+
+**Goal:** Identify directories containing project documentation, excluding source code, tests, build artifacts, and configuration.
+
+**Heuristics and Steps:**
+1. **Initial Scan:** Read the contents of the project root directory.
+2. **Candidate Identification:** Identify potential documentation directories based on:
+   - **Common Names:** Look for directories with names like `docs`, `documentation`, `wiki`, `manuals`, or project-specific documentation folders.
+   - **Content Types:** Prioritize directories containing Markdown (`.md`), reStructuredText (`.rst`), HTML, or other documentation formats.
+   - **Absence of Code Indicators:** Exclude directories that primarily contain code files.
+3. **Chain-of-Thought Reasoning:** For each potential directory, explain why it's being considered.
+4. **Update `.clinerules` with `[DOC_DIRECTORIES]`.**
+5. **MUP:** Follow the Mandatory Update Protocol.
+
+**Example Chain of Thought:**
+"Scanning the project root, I see directories: `docs`, `documentation`, `src`, `tests`. `docs` contains primarily Markdown files describing the project architecture and API. `documentation` contains user guides in HTML format. Both appear to be documentation directories. `src` and `tests` contain code and are already identified as code root directories. Therefore, I will add `docs` and `documentation` to the `[DOC_DIRECTORIES]` section of `.clinerules`."
+
+
+## XII. Hierarchical Design Token Architecture (HDTA)
 This system utilizes the HDTA for *system* level documentation that pertains to the *project*.  Information is organized into four tiers:
 
 1.  **System Manifest:** Top-level overview (stored in `system_manifest.md`). Created during Set-up/Maintenance.
@@ -298,7 +319,7 @@ See the `cline_docs/templates/` directory for the specific Markdown format for e
 
 ---
 
-## XII. Mandatory Periodic Documentation Updates
+## XIII. Mandatory Periodic Documentation Updates
 
 The LLM **MUST** perform a complete Mandatory Update Protocol (MUP) every 5 turns/interactions, regardless of task completion status. This periodic update requirement ensures:
 
@@ -325,7 +346,7 @@ The LLM **MUST** perform a complete Mandatory Update Protocol (MUP) every 5 turn
 
 ---
 
-## XIII. Conclusion
+## XIV. Conclusion
 
 The CRCT framework manages complex tasks via recursive decomposition and persistent state. Adhere to this prompt and plugin instructions in `cline_docs/prompts/` for effective task management.
 
