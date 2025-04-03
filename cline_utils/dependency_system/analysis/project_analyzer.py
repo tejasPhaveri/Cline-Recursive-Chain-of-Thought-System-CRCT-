@@ -63,7 +63,7 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
 
     # --- Exclusion Setup ---
     excluded_dirs_rel = config.get_excluded_dirs()
-    excluded_paths_rel = config.get_excluded_paths()
+    excluded_paths_rel = config.get_excluded_paths() # This now includes wildcard patterns
     excluded_extensions = set(config.get_excluded_extensions())
 
     excluded_dirs_abs = {normalize_path(os.path.join(project_root, p)) for p in excluded_dirs_rel}
@@ -82,7 +82,14 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     # --- Root Directories Setup ---
     code_root_directories_rel = config.get_code_root_directories()
     doc_directories_rel = config.get_doc_directories()
+    # Combine unique roots
     all_roots_rel = list(set(code_root_directories_rel + doc_directories_rel)) # Use set for uniqueness
+
+    # <<< START FIX >>>
+    # Sort the relative root paths alphabetically to ensure stable order
+    all_roots_rel.sort()
+    logger.debug(f"Processing root directories in stable order: {all_roots_rel}")
+    # <<< END FIX >>>
 
     if not code_root_directories_rel:
         logger.error("No code root directories configured.")
@@ -98,8 +105,11 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     # --- Key Generation ---
     logger.info("Generating keys...")
     try:
-        # Pass absolute excluded paths to generate_keys
-        key_map, new_keys, initial_suggestions = generate_keys(all_roots_rel, precomputed_excluded_paths=all_excluded_paths_abs)
+        # Pass the SORTED relative roots and the precomputed absolute excluded paths
+        key_map, new_keys, initial_suggestions = generate_keys(
+            all_roots_rel, # Pass the sorted list
+            precomputed_excluded_paths=all_excluded_paths_abs
+        )
         results["tracker_initialization"]["key_generation"] = "success"
         logger.info(f"Generated {len(key_map)} keys for {len(key_map)} files/dirs.")
         if new_keys:
@@ -112,34 +122,41 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     # --- File Identification and Filtering for Analysis ---
     logger.info("Identifying files for analysis...")
     files_to_analyze_abs = []
+    # Use abs_all_roots for finding files, order doesn't strictly matter here
     for abs_root_dir in abs_all_roots:
         if not os.path.isdir(abs_root_dir):
             logger.warning(f"Configured root directory not found: {abs_root_dir}")
             continue
+        # Use os.walk - order within walk is OS-dependent but shouldn't affect analysis results
         for root, dirs, files in os.walk(abs_root_dir, topdown=True):
             norm_root = normalize_path(root)
-            # Filter directories first
+            # Filter directories based on *absolute* paths
+            # Note: This filtering might affect subsequent walks if not careful, but topdown=True helps.
             dirs[:] = [d for d in dirs if normalize_path(os.path.join(norm_root, d)) not in excluded_dirs_abs]
 
-            # Check if the current directory itself is excluded
-            is_root_excluded = False
-            for excluded_dir in excluded_dirs_abs:
-                 if is_subpath(norm_root, excluded_dir):
-                      is_root_excluded = True
-                      break
-            if is_root_excluded:
-                logger.debug(f"Skipping files in excluded directory: {norm_root}")
-                continue # Skip files in this directory
+            # Check if the current directory itself is excluded by path/pattern
+            is_root_excluded_by_path = False
+            # Check against the comprehensive exclusion set
+            if norm_root in all_excluded_paths_abs or \
+               any(is_subpath(norm_root, excluded) for excluded in excluded_dirs_abs): # Check subpath for dirs
+                 is_root_excluded_by_path = True
 
+            if is_root_excluded_by_path:
+                logger.debug(f"Skipping files in excluded directory: {norm_root}")
+                dirs[:] = [] # Prevent recursion into excluded directories
+                continue
+
+            # Process files in the current directory
             for file in files:
                 file_path_abs = normalize_path(os.path.join(norm_root, file))
-                # Check specific path exclusions and extension exclusions
-                if any(is_subpath(file_path_abs, excluded) for excluded in excluded_paths_abs) or \
-                   os.path.splitext(file)[1].lower() in excluded_extensions or \
-                   file.endswith("_module.md"): # Exclude mini-trackers
+                # Check specific path exclusions, extension exclusions, and tracker naming
+                if file_path_abs in all_excluded_paths_abs or \
+                   os.path.splitext(file)[1].lower().lstrip('.') in excluded_extensions or \
+                   file.endswith("_module.md"):
                     logger.debug(f"Skipping analysis for excluded/tracker file: {file_path_abs}")
+                    pass
                 else:
-                    # Only analyze files that have a key assigned
+                    # Only analyze files that have a key assigned (meaning they weren't excluded during key gen)
                     if file_path_abs in path_to_key:
                          files_to_analyze_abs.append(file_path_abs)
                     # else: # This case should be rare if generate_keys worked correctly
@@ -155,7 +172,7 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     analysis_results_list = process_items(
         files_to_analyze_abs,
         analyze_file,
-        force=force_analysis # Assuming analyze_file accepts a 'force' kwarg
+        force=force_analysis
     )
 
     file_analysis_results: Dict[str, Any] = {}
@@ -183,6 +200,7 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     # --- Create file_to_module mapping ---
     # Maps absolute file path -> absolute module directory path
     file_to_module: Dict[str, str] = {}
+    sorted_code_roots = sorted(list(abs_code_roots), key=len, reverse=True) # Sort by length descending
     # Ensure correct mapping even for files directly in code roots
     for file_abs_path in key_map.values(): # Iterate through all known absolute paths
         found_module = False
@@ -235,7 +253,7 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
         if not success:
              # Don't change overall status to error, but log warning
              results["message"] += " Warning: Embedding generation failed for some paths."
-             logger.warning("Embedding generation failed or was skipped for some paths.")
+             logger.warning("Embedding generation failed or skipped for some paths.")
         else:
              logger.info("Embedding generation completed successfully.")
     except Exception as e:
@@ -287,7 +305,7 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
         for source_key, suggestion_list in all_suggestions.items():
              # Use the _combine_suggestions_with_char_priority helper from suggester
              from cline_utils.dependency_system.analysis.dependency_suggester import _combine_suggestions_with_char_priority
-             combined_suggestions_per_source[source_key] = _combine_suggestions_with_char_priority(suggestion_list)
+             for source_key, suggestion_list in all_suggestions.items(): combined_suggestions_per_source[source_key] = _combine_suggestions_with_char_priority(suggestion_list)
 
         all_suggestions = combined_suggestions_per_source # Replace raw with combined
 
@@ -342,8 +360,6 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
                                     current_source_suggestions_for_update[:] = [(orig_t, 'x' if orig_t == target_key else orig_c) for orig_t, orig_c in current_source_suggestions_for_update]
 
                           # else: Keep existing for other equal priority conflicts
-
-
         results["dependency_suggestion"]["status"] = "success"
         logger.info("Dependency suggestion and reciprocal handling completed.")
 
@@ -423,16 +439,9 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
         logger.exception(results["message"])
         return results
 
-    # --- Final Status Check ---
-    if results["status"] == "success":
-         print("Project analysis completed successfully.")
-         results["message"] = "Project analysis completed successfully."
-    elif results["status"] == "warning":
-         print("Project analysis completed with warnings. Check logs.")
-         if not results["message"]: # Add generic warning if none exists
-              results["message"] = "Project analysis completed with warnings."
-    # Error status is handled by early returns mostly
-
+    # --- Final Status Check & Return ---
+    if results["status"] == "success": print("Project analysis completed successfully."); results["message"] = "Project analysis completed successfully."
+    elif results["status"] == "warning": print("Project analysis completed with warnings. Check logs."); results["message"] = results.get("message", "") + " Project analysis completed with warnings."
     return results
 
 def _is_empty_dir(dir_path: str) -> bool:
@@ -440,10 +449,7 @@ def _is_empty_dir(dir_path: str) -> bool:
     Checks if a directory is empty (contains no files or subdirectories).
     Handles potential permission errors.
     """
-    try:
-        # Listdir will return empty list for empty dir, non-empty otherwise.
-        # Raises OSError if path doesn't exist or isn't a directory, or permission denied.
-        return not os.listdir(dir_path)
+    try: return not os.listdir(dir_path)
     except FileNotFoundError:
         logger.warning(f"Directory not found while checking if empty: {dir_path}")
         return True # Treat non-existent as empty for skipping purposes

@@ -380,10 +380,10 @@ class ConfigManager:
 
     def get_code_root_directories(self) -> List[str]:
         """
-        Get list of code root directories from .clinerules.
+        Get list of code root directories from .clinerules, sorted alphabetically.
 
         Returns:
-            List of code root directories
+            Sorted list of code root directories
         """
         from .cache_manager import cached
 
@@ -403,21 +403,28 @@ class ConfigManager:
                         continue
                     if in_code_root_section:
                         if line.startswith("-"):
-                            code_root_dirs.append(line[2:].strip())
-                        elif line.startswith("["):
-                            break
+                            # Normalize path *before* adding to list
+                            path_part = line[1:].strip() # Get content after '-'
+                            if path_part: # Ensure it's not just '-'
+                                code_root_dirs.append(normalize_path(path_part))
+                        elif line.startswith("["): break # Reached next section
+            except FileNotFoundError:
+                logger.warning("'.clinerules' file not found. Cannot read code root directories.")
             except Exception as e:
-                logger.error(f"Error reading .clinerules: {e}")
-            return [normalize_path(d) for d in code_root_dirs]
+                logger.error(f"Error reading .clinerules for code roots: {e}")
+            # *** SORT the result alphabetically ***
+            code_root_dirs.sort()
+            logger.debug(f"Found and sorted code roots: {code_root_dirs}")
+            return code_root_dirs
 
         return _get_code_root_directories(self)
 
     def get_doc_directories(self) -> List[str]:
         """
-        Get list of doc directories from .clinerules.
+        Get list of doc directories from .clinerules, sorted alphabetically.
 
         Returns:
-            List of doc directories
+            Sorted list of doc directories
         """
         from .cache_manager import cached
 
@@ -437,12 +444,19 @@ class ConfigManager:
                         continue
                     if in_doc_section:
                         if line.startswith("-"):
-                            doc_dirs.append(line[2:].strip())
-                        elif line.startswith("["):
-                            break
+                             # Normalize path *before* adding to list
+                            path_part = line[1:].strip() # Get content after '-'
+                            if path_part: # Ensure it's not just '-'
+                                doc_dirs.append(normalize_path(path_part))
+                        elif line.startswith("["): break # Reached next section
+            except FileNotFoundError:
+                 logger.warning("'.clinerules' file not found. Cannot read doc directories.")
             except Exception as e:
-                logger.error(f"Error reading .clinerules: {e}")
-            return [normalize_path(d) for d in doc_dirs]
+                logger.error(f"Error reading .clinerules for doc dirs: {e}")
+            # *** SORT the result alphabetically ***
+            doc_dirs.sort()
+            logger.debug(f"Found and sorted doc dirs: {doc_dirs}")
+            return doc_dirs
 
         return _get_doc_directories(self)
 

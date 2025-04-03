@@ -679,6 +679,7 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
     filtered_keys = {} # Keys relevant for DEFINITIONS in this tracker
     relevant_keys_for_grid = [] # Keys relevant for GRID rows/columns in this tracker
     final_suggestions_to_apply = defaultdict(list) # Suggestions filtered/aggregated for THIS tracker
+    module_path = "" # Keep track of module path for mini-trackers
 
     # --- Determine Type-Specific Settings ---
     if tracker_type == "main":
@@ -691,10 +692,7 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
         try:
             # Aggregation reads mini-trackers and performs hierarchical rollup
             aggregated_result = main_tracker_data["dependency_aggregation"](
-                project_root,
-                key_map,
-                filtered_keys, # Pass module keys
-                file_to_module
+                project_root, key_map, filtered_keys, file_to_module
             )
             # Convert result to defaultdict format
             for src, targets in aggregated_result.items():
@@ -744,7 +742,6 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
         # Determine relevant keys for the grid (internal + external dependencies touched by internal files)
         relevant_keys_set = internal_keys_set.copy()
 
-        # --- ADD: Get excluded paths again for filtering ---
         config = ConfigManager()
         project_root_for_exclude = get_project_root() # Get project root for absolute paths
         # Get ALL excluded paths (dirs, specific files, AND patterns)
@@ -752,27 +749,21 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
         # get_excluded_paths now includes pattern results
         excluded_files_abs = set(config.get_excluded_paths()) # This returns absolute paths
         all_excluded_abs = excluded_dirs_abs.union(excluded_files_abs)
-        # --- END ADD ---
-
 
         if suggestions:
             for src_key, deps in suggestions.items():
                  source_is_internal = src_key in internal_keys_set
                  if source_is_internal:
-                      # --- ADD Check: Ensure source is not excluded ---
                       src_path = key_map.get(src_key)
                       if src_path and src_path in all_excluded_abs:
                            continue # Skip suggestions FROM excluded files
-                      # --- END Check ---
                       relevant_keys_set.add(src_key) # Add internal source
 
                       for target_key, dep_char in deps:
                            if dep_char != PLACEHOLDER_CHAR and dep_char != DIAGONAL_CHAR and target_key in key_map:
-                                # --- ADD Check: Ensure target is not excluded ---
                                 tgt_path = key_map.get(target_key)
                                 if not tgt_path or tgt_path in all_excluded_abs:
                                      continue # Skip suggestions TO excluded files
-                                # --- END Check ---
                                 relevant_keys_set.add(target_key) # Add target if dependency exists and not excluded
 
         # Also consider incoming dependencies to internal files
@@ -783,7 +774,6 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                  tgt_path = key_map.get(target_key)
                  if tgt_path and tgt_path in all_excluded_abs:
                       continue # Skip incoming deps TO excluded internal files
-                 # --- END Check ---
 
                  # Find sources pointing to this non-excluded internal target
                  for src_key, deps in suggestions.items():
@@ -793,9 +783,7 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                              src_path = key_map.get(src_key)
                              if not src_path or src_path in all_excluded_abs:
                                  continue # Skip incoming deps FROM excluded files
-                             # --- END Check ---
                              relevant_keys_set.add(src_key) # Add non-excluded source
-
 
         # --- FINAL FILTERING: Remove any keys corresponding to excluded paths ---
         final_relevant_keys_list = []
@@ -806,7 +794,6 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
             # else: logger.debug(f"Filtering excluded key '{k}' from mini-tracker grid {os.path.basename(output_file)}")
 
         relevant_keys_for_grid = final_relevant_keys_list # Use the final filtered list
-        # --- END REVISED ---
 
         logger.info(f"Mini tracker update for module {module_key} ({os.path.basename(module_path)}). Grid keys: {len(relevant_keys_for_grid)}.")
 
@@ -814,7 +801,6 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
         if suggestions:
              for src, targets in suggestions.items():
                   final_suggestions_to_apply[src].extend(targets)
-
     else:
         raise ValueError(f"Unknown tracker type: {tracker_type}")
 
@@ -826,7 +812,6 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
     relevant_new_keys_list = []
     if new_keys:
         relevant_new_keys_list = sort_keys([k for k in new_keys if k in keys_in_final_grid_set])
-
 
     existing_key_defs = {}
     existing_grid = {}
@@ -935,28 +920,29 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                 # Ensure decompressed row has expected length based on *old* keys
                 if len(decomp_row) == len(old_keys_list):
                     for old_col_idx, value in enumerate(decomp_row):
-                         old_col_key = old_keys_list[old_col_idx]
-                         if old_col_key in final_key_to_idx: # If the col key is also kept
-                             new_col_idx = final_key_to_idx[old_col_key]
-                             # Copy value if not placeholder/diagonal AND target cell is still placeholder
-                             if value != PLACEHOLDER_CHAR and value != DIAGONAL_CHAR and \
-                                temp_decomp_grid[old_row_key][new_col_idx] == PLACEHOLDER_CHAR:
-                                  temp_decomp_grid[old_row_key][new_col_idx] = value
-                else:
-                     logger.warning(f"Grid Rebuild: Row length mismatch for key '{old_row_key}' in {output_file} (expected {len(old_keys_list)}, got {len(decomp_row)}). Skipping values.")
-            except Exception as e:
-                 logger.warning(f"Grid Rebuild: Error decompressing row for key '{old_row_key}' in {output_file}: {e}. Skipping values.")
+                         # Prevent IndexError if old_keys_list is unexpectedly short
+                         if old_col_idx < len(old_keys_list):
+                             old_col_key = old_keys_list[old_col_idx]
+                             if old_col_key in final_key_to_idx: # If the col key is also kept
+                                 new_col_idx = final_key_to_idx[old_col_key]
+                                 new_row_idx = final_key_to_idx[old_row_key] # Get index for the row key in the new grid
 
+                                 # Copy the old value, unless it's the diagonal cell in the *new* grid
+                                 if new_row_idx != new_col_idx:
+                                     temp_decomp_grid[old_row_key][new_col_idx] = value
+                                 # else: Diagonal was already set during init, don't overwrite with old value
+                         # else: logger.warning(f"old_col_idx {old_col_idx} out of bounds for old_keys_list (len {len(old_keys_list)})")
+                else:
+                     logger.warning(f"Grid Rebuild: Row length mismatch for '{old_row_key}' in {output_file}. Skipping values.")
+            except Exception as e:
+                 logger.warning(f"Grid Rebuild: Error processing row '{old_row_key}' in {output_file}: {e}. Skipping values.")
 
     # --- Apply Suggestions to Decompressed Grid ---
     suggestion_applied = False
     if final_suggestions_to_apply:
         logger.debug(f"Applying {sum(len(v) for v in final_suggestions_to_apply.values())} suggestions to grid for {output_file}")
-
-        # Use the temp_decomp_grid built above
         for row_key, deps in final_suggestions_to_apply.items():
             if row_key not in final_key_to_idx: continue # Skip suggestions for rows not in the final grid
-
             current_decomp_row = temp_decomp_grid.get(row_key)
             if not current_decomp_row: continue
 
@@ -967,7 +953,7 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                 col_idx = final_key_to_idx[col_key]
                 existing_char = current_decomp_row[col_idx]
 
-                # Apply suggestion only if current char is a placeholder
+                # Apply suggestion only if current char is placeholder
                 if existing_char == PLACEHOLDER_CHAR and dep_char != PLACEHOLDER_CHAR:
                     current_decomp_row[col_idx] = dep_char
                     if not suggestion_applied: # Update message only on first application
@@ -981,8 +967,7 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                                    f"For {row_key}->{col_key}, grid has '{existing_char}', suggestion is '{dep_char}'. "
                                    f"Grid value kept. Manual review recommended.")
                     logger.warning(warning_msg)
-                    # Optionally print: print(f"WARNING: {warning_msg}")
-
+                    print(f"WARNING: {warning_msg}")
             # Update the map with the modified row
             temp_decomp_grid[row_key] = current_decomp_row
 
@@ -1017,8 +1002,8 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                 # Ensure newline after marker line if missing
                 if not lines[mini_tracker_start_index].endswith('\n'): f.write('\n')
             # Add newline separator if we wrote 'before' content or if not mini
-            if (is_mini and mini_tracker_start_index != -1) or not is_mini:
-                 f.write("\n")
+            if is_mini and mini_tracker_start_index != -1:
+                f.write("\n") # Only add newline after preserved mini header
 
             # Write the updated tracker data section
             _write_key_definitions(f, final_key_defs)
@@ -1035,7 +1020,6 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
             # If overwriting a mini-tracker (markers missing), add end marker
             elif is_mini and mini_tracker_start_index == -1:
                  f.write("\n" + marker_end + "\n")
-
 
         logger.info(f"Successfully updated tracker: {output_file}")
         # Invalidate cache for this specific tracker file
