@@ -1,22 +1,20 @@
 # analysis/project_analyzer.py
 
 from collections import defaultdict
+import fnmatch
 import json
 import os
 from typing import Any, Dict, Optional, List, Tuple
-
-# Added imports
 from cline_utils.dependency_system.core.dependency_grid import decompress
-from cline_utils.dependency_system.io.tracker_io import read_tracker_file, get_tracker_path, update_tracker # Added get_tracker_path, update_tracker
+from cline_utils.dependency_system.io.tracker_io import read_tracker_file, get_tracker_path, update_tracker
 import uuid
 import logging
-# logging.basicConfig(level=logging.DEBUG) # Removed: Configured in dependency_processor.py
 from cline_utils.dependency_system.analysis.dependency_analyzer import analyze_file
 from cline_utils.dependency_system.utils.batch_processor import BatchProcessor, process_items
 from cline_utils.dependency_system.analysis.dependency_suggester import suggest_dependencies
 from cline_utils.dependency_system.analysis.embedding_manager import generate_embeddings
 from cline_utils.dependency_system.core.key_manager import get_key_from_path, generate_keys, validate_key, KeyInfo, KeyGenerationError, sort_keys
-from cline_utils.dependency_system.utils.cache_manager import cached, file_modified, clear_all_caches # Added clear_all_caches
+from cline_utils.dependency_system.utils.cache_manager import cached, file_modified, clear_all_caches
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
 from cline_utils.dependency_system.utils.path_utils import is_subpath, normalize_path, get_project_root
 
@@ -60,9 +58,10 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
 
     # --- Exclusion Setup ---
     excluded_dirs_rel = config.get_excluded_dirs()
-    excluded_paths_rel = config.get_excluded_paths() # This now includes wildcard patterns
+    excluded_paths_rel = config.get_excluded_paths()
     excluded_extensions = set(config.get_excluded_extensions())
-
+    excluded_file_patterns = config.config.get("excluded_file_patterns", [])
+    
     excluded_dirs_abs = {normalize_path(os.path.join(project_root, p)) for p in excluded_dirs_rel}
     excluded_paths_abs = {normalize_path(os.path.join(project_root, p)) for p in excluded_paths_rel}
     all_excluded_paths_abs = excluded_dirs_abs.union(excluded_paths_abs)
@@ -142,12 +141,14 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
             else:
                 logger.warning(f"File '{key_info.norm_path}' (Key: {key_info.key_string}) has no parent path. Cannot map to a module.")
     logger.info(f"File-to-module mapping created with {len(file_to_module)} entries.")
-    # <<< *** END NEW BLOCK *** >>>
 
-
-    # --- File Identification and Filtering for Analysis ---
+    # --- File Identification and Filtering ---
+    config_manager_instance = ConfigManager()
     logger.info("Identifying files for analysis...")
     files_to_analyze_abs = []
+    # Get excluded_file_patterns from config
+    excluded_file_patterns = config_manager_instance.config.get("excluded_file_patterns", [])
+
     # Use abs_all_roots for finding files, order doesn't strictly matter here
     for abs_root_dir in abs_all_roots:
         if not os.path.isdir(abs_root_dir):
@@ -156,15 +157,19 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
         # Use os.walk - order within walk is OS-dependent but shouldn't affect analysis results
         for root, dirs, files in os.walk(abs_root_dir, topdown=True):
             norm_root = normalize_path(root)
-            # Filter directories based on *absolute* paths
-            # Note: This filtering might affect subsequent walks if not careful, but topdown=True helps.
-            dirs[:] = [d for d in dirs if normalize_path(os.path.join(norm_root, d)) not in excluded_dirs_abs]
+            
+            # Directory filtering
+            dirs[:] = [
+                d for d in dirs 
+                if d not in excluded_dirs_rel
+                and normalize_path(os.path.join(norm_root, d)) not in all_excluded_paths_abs
+            ]
 
             # Check if the current directory itself is excluded by path/pattern
             is_root_excluded_by_path = False
             # Check against the comprehensive exclusion set
             if norm_root in all_excluded_paths_abs or \
-               any(is_subpath(norm_root, excluded) for excluded in excluded_dirs_abs):
+               any(is_subpath(norm_root, excluded) for excluded in all_excluded_paths_abs):
                  is_root_excluded_by_path = True
 
             if is_root_excluded_by_path:
@@ -175,21 +180,26 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
             # Process files in the current directory
             for file in files:
                 file_path_abs = normalize_path(os.path.join(norm_root, file))
-                # Check specific path exclusions, extension exclusions, and tracker naming
-                if file_path_abs in all_excluded_paths_abs or \
-                   os.path.splitext(file)[1].lower().lstrip('.') in excluded_extensions or \
-                   file.endswith("_module.md"):
-                    logger.debug(f"Skipping analysis for excluded/tracker file: {file_path_abs}")
-                    pass
+                file_basename = os.path.basename(file_path_abs)
+                _, file_ext = os.path.splitext(file)
+                file_ext = file_ext.lower()
+
+                # Check all exclusion criteria
+                is_excluded = (
+                    file_path_abs in all_excluded_paths_abs
+                    or any(is_subpath(file_path_abs, excluded) for excluded in all_excluded_paths_abs)
+                    or file_ext in excluded_extensions
+                    or any(fnmatch.fnmatch(file_basename, pattern) for pattern in excluded_file_patterns)
+                )
+
+                if is_excluded:
+                    logger.debug(f"Skipping excluded file: {file_path_abs}")
+                    continue
+
+                if file_path_abs in path_to_key_info:
+                    files_to_analyze_abs.append(file_path_abs)
                 else:
-                    # <<< *** MODIFIED CHECK *** >>>
-                    # Only analyze files that have a key assigned (exist in the map)
-                    if file_path_abs in path_to_key_info:
-                         files_to_analyze_abs.append(file_path_abs)
-                    else:
-                         # Log only if unexpected (file exists but wasn't keyed)
-                         if os.path.exists(file_path_abs):
-                              logger.warning(f"File found but no key generated (likely excluded during key gen): {file_path_abs}")
+                    logger.warning(f"File found but no key generated: {file_path_abs}")
 
     logger.info(f"Found {len(files_to_analyze_abs)} files to analyze.")
 
