@@ -1,10 +1,20 @@
-# Cline Recursive Chain-of-Thought System (CRCT) - v7.2
+# Cline Recursive Chain-of-Thought System (CRCT) - v7.5
 
-Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework designed to manage context, dependencies, and tasks in large-scale Cline projects within VS Code. Built for the Cline extension, CRCT leverages a recursive, file-based approach with a modular dependency tracking system to keep your project's state persistent and efficient, even as complexity grows.
+Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework designed to manage context, dependencies, and tasks in large-scale Cline projects within VS Code. Built for the Cline extension, CRCT leverages a recursive, file-based approach with a modular dependency tracking system to maintain project state and efficiency as complexity increases.
 
-This is **v7.2**, the initial release of the fully modularized dependency system, marking a significant transition from the basic v7.0. This version introduces a more automated design, consolidating operations and enhancing efficiency, and includes base templates for all core files and the `dependency_processor.py` script.
+Version **v7.5** represents a significant restructuring of the CRCT system, bringing it into alignment with its original design goals.  With the core architecture now established, future v7.x releases will focus on performance optimizations, enhancements, and refining the existing codebase.
 
-(This README and INSTRUCTIONS.md will be updated to reflect more granular changes over the next few days)
+This version includes a more automated design, consolidating operations and enhancing efficiency.
+It also incorporates:
+- base templates for all core files
+- modular dependency processing system
+- **Contextual Keys (KeyInfo)**: A fundamental shift to using contextual keys for more precise and hierarchical dependency tracking.
+- **Hierarchical Dependency Aggregation**:  Enables rolled-up dependency views in the main tracker, offering a better understanding of project-level dependencies.
+- **Enhanced `show-dependencies` command**: Provides a powerful way to inspect dependencies, aggregating information from all trackers for a given key, simplifying dependency analysis.
+- **Configurable Embedding Device**:  Allows users to optimize performance by selecting the embedding device (`cpu`, `cuda`, `mps`) via `.clinerules.config.json`.
+- **File Exclusion Patterns**:  Users can now customize project analysis by defining file exclusion patterns in `.clinerules.config.json`.
+- **Improved Caching and Batch Processing**: Enhanced system performance and efficiency through improved caching and batch processing mechanisms.
+
 
 ---
 
@@ -14,13 +24,17 @@ This is **v7.2**, the initial release of the fully modularized dependency system
 - **Minimal Context Loading**: Loads only essential data, expanding via dependency trackers as needed.
 - **Persistent State**: Uses the VS Code file system to store context, instructions, outputs, and dependencies—kept up-to-date via a **Mandatory Update Protocol (MUP)**.
 - **Modular Dependency System**: Fully modularized dependency tracking system.
-- **New Cache System**: Implemented a new caching mechanism for improved performance.
-- **New Batch Processing System**: Introduced a batch processing system for handling large tasks efficiently.
+- **Contextual Keys**: Introduces `KeyInfo` for context-rich keys, enabling more accurate and hierarchical dependency tracking.
+- **Hierarchical Dependency Aggregation**: Implements hierarchical rollup and foreign dependency aggregation for the main tracker, providing a more comprehensive view of project dependencies.
+- **New `show-dependencies`command**: The LLM no longer has to manually read and decipher tracker files. This arg will automatically read all trackers for the provided key and return both inbound and outbound dependencies with a full path to each related file. (The LLM still needs to manually replace any placeholder characters 'p', but can now do so with the `add-dependency` command, greatly simplifying the process.)
+- **Configurable Embedding Device**: Allows users to configure the embedding device (`cpu`, `cuda`, `mps`) via `.clinerules.config.json` for optimized performance on different hardware. (Note: *the system does not yet install the requirements for cuda or mps automatically, please install the requirements manually or with the help of the LLM.*)
+- **File Exclusion Patterns**: Users can now define file exclusion patterns in `.clinerules.config.json` to customize project analysis.
+- **New Cache System**: Implemented a new caching mechanism for improved performance, including improved invalidation logic.
+- **New Batch Processing System**: Introduced a batch processing system for handling large tasks efficiently, with enhanced flexibility in passing arguments to processor functions.
 - **Modular Dependency Tracking**:
   - Mini-trackers (file/function-level within modules)
   - Uses hierarchical keys and RLE compression for efficiency.
 - **Automated Operations**: System operations are now largely automated and condensed into single commands, streamlining workflows and reducing manual command execution.
-- **New `show-dependencies`command**: The LLM no longer has to manually read and decipher tracker files. This arg will automatically read all trackers for the provided key and return both inbound and outbound dependencies with a full path to each related file. (The LLM still needs to manually replace any placeholder characters 'p', but can now do so with the `add-dependency` command, greatly simplifying the process.)
 - **Phase-Based Workflow**: Operates in distinct phases—**Set-up/Maintenance**, **Strategy**, **Execution**—controlled by `.clinerules`.
 - **Chain-of-Thought Reasoning**: Ensures transparency with step-by-step reasoning and reflection.
 
@@ -28,7 +42,7 @@ This is **v7.2**, the initial release of the fully modularized dependency system
 
 ## Quickstart
 
-1. **Clone the Repo**: 
+1. **Clone the Repo**:
    ```bash
    git clone https://github.com/RPG-fan/Cline-Recursive-Chain-of-Thought-System-CRCT-.git
    cd Cline-Recursive-Chain-of-Thought-System-CRCT-
@@ -95,11 +109,11 @@ Cline-Recursive-Chain-of-Thought-System-CRCT-/
 
 ## Current Status & Future Plans
 
-- **v7.2**: Initial full release of the modular dependency system, new cache system, and batch processing system. Includes templates for all `cline_docs/` files. This release marks a significant step towards a more automated and efficient system.
-- **Efficiency**: Achieves a ~1.9 efficiency ratio (90% fewer characters) for dependency tracking vs. full names—improving with scale.
-- **Savings for Smaller Projects & Dependency Storage**: This version refines dependency storage and extends efficiency savings to smaller projects, making CRCT more versatile.
-- **Automated Design**: System operations are now largely automated, condensing most procedures into single commands like `analyze-project`, streamlining workflows.
-- **Ongoing Development**: Continued development will focus on further refinements and optimizations of the modular system.
+- **v7.5**:  This release marks a significant restructuring of the CRCT system, bringing it into alignment with its original design goals. **Key architectural changes include the introduction of Contextual Keys (`KeyInfo`) and Hierarchical Dependency Aggregation, enhancing the precision and scalability of dependency tracking.** Key features also include the new `show-dependencies` command for simplified dependency inspection, configurable embedding device, and file exclusion patterns.
+- **Efficiency**: Achieves a ~1.9 efficiency ratio (90% fewer characters) for dependency tracking compared to full names, with efficiency improving at larger scales.
+- **Savings for Smaller Projects & Dependency Storage**: Version 7.5 enhances dependency storage and extends efficiency benefits to smaller projects, increasing CRCT versatility.
+- **Automated Design**: System operations are largely automated, condensing most procedures into single commands such as `analyze-project`, which streamlines workflows.
+- **Future Focus**: With the core architecture of v7.5 established, future development will concentrate on performance optimizations, enhancements, and the refinement of existing functionalities within the v7.x series. **Specifically, future v7.x releases will focus on performance optimizations, enhancements to the new `show-dependencies` command, and refining the existing codebase.**
 
 Feedback is welcome! Please report bugs or suggestions via GitHub Issues.
 
