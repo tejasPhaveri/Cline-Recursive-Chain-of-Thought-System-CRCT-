@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 # Caching for analyze_project (Consider if key_func needs more refinement)
 # @cached("project_analysis",
-#         key_func=lambda force_analysis=False, force_embeddings=False, **kwargs:
-#         f"analyze_project:{normalize_path(get_project_root())}:{(os.path.getmtime(ConfigManager().config_path) if os.path.exists(ConfigManager().config_path) else 0)}:{force_analysis}:{force_embeddings}")
+#        key_func=lambda force_analysis=False, force_embeddings=False, **kwargs:
+#        f"analyze_project:{normalize_path(get_project_root())}:{(os.path.getmtime(ConfigManager().config_path) if os.path.exists(ConfigManager().config_path) else 0)}:{force_analysis}:{force_embeddings}")
 def analyze_project(force_analysis: bool = False, force_embeddings: bool = False) -> Dict[str, Any]:
     """
     Analyzes all files in a project to identify dependencies between them,
@@ -43,8 +43,8 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     analyzer_batch_processor = BatchProcessor()
     # Clear relevant caches if forcing re-analysis (more targeted cache clearing might be needed)
     if force_analysis:
-        logger.info("Force analysis requested. Clearing relevant caches.")
-        clear_all_caches(categories=["file_analysis", "path_normalization", "file_types", "import_map", "resolve_source", "python_imports", "js_imports", "md_links", "html_resources", "css_imports"])
+        logger.info("Force analysis requested. Clearing all caches.")
+        clear_all_caches()
 
     results = {
         "status": "success",

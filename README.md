@@ -15,6 +15,16 @@ It also incorporates:
 - **File Exclusion Patterns**:  Users can now customize project analysis by defining file exclusion patterns in `.clinerules.config.json`.
 - **Improved Caching and Batch Processing**: Enhanced system performance and efficiency through improved caching and batch processing mechanisms.
 
+**<<<IMPORTANT_NOTICE>>>**
+
+Caching has passed initial tests and has been re-enabled across the system. If you notice odd behavior or inaccuracies, please report them in the github issues section.
+- If issues arise **comment** (`#`) out the `@cached` decorators and the lines leading up to the def  (`# @cached(...)`)
+
+Cache + batch processing enable *significant* time savings.
+- Test project **without** cache and batch processing took ~`11` minutes.
+- Test project **with** cache and batch processing took ~`30` seconds.
+
+**<<<END_IMPORTANT_NOTICE>>>**
 
 ---
 

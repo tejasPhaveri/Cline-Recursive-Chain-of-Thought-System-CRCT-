@@ -41,9 +41,9 @@ logger = logging.getLogger(__name__)
 
 # --- Path Finding ---
 # Caching for get_tracker_path (consider config mtime)
-# @cached("tracker_paths",
-#         key_func=lambda project_root, tracker_type="main", module_path=None:
-#         f"tracker_path:{normalize_path(project_root)}:{tracker_type}:{normalize_path(module_path) if module_path else 'none'}:{(os.path.getmtime(ConfigManager().config_path) if os.path.exists(ConfigManager().config_path) else 0)}")
+@cached("tracker_paths",
+        key_func=lambda project_root, tracker_type="main", module_path=None:
+         f"tracker_path:{normalize_path(project_root)}:{tracker_type}:{normalize_path(module_path) if module_path else 'none'}:{(os.path.getmtime(ConfigManager().config_path) if os.path.exists(ConfigManager().config_path) else 0)}")
 def get_tracker_path(project_root: str, tracker_type: str = "main", module_path: Optional[str] = None) -> str:
     """
     Get the path to the appropriate tracker file based on type. Ensures path uses forward slashes.
@@ -78,9 +78,9 @@ def get_tracker_path(project_root: str, tracker_type: str = "main", module_path:
 
 # --- File Reading ---
 # Caching for read_tracker_file based on path and modification time.
-# @cached("tracker_data",
-#         key_func=lambda tracker_path:
-#         f"tracker_data:{normalize_path(tracker_path)}:{(os.path.getmtime(tracker_path) if os.path.exists(tracker_path) else 0)}")
+@cached("tracker_data",
+        key_func=lambda tracker_path:
+        f"tracker_data:{normalize_path(tracker_path)}:{(os.path.getmtime(tracker_path) if os.path.exists(tracker_path) else 0)}")
 def read_tracker_file(tracker_path: str) -> Dict[str, Any]:
     """
     Read a tracker file and parse its contents. Caches based on path and mtime.

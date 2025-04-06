@@ -15,7 +15,7 @@ from collections import defaultdict # Ensure defaultdict is imported if used (e.
 from cline_utils.dependency_system.utils.cache_manager import cached, invalidate_dependent_entries, clear_all_caches
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
 # Import only validate_key if needed, sort_keys is removed
-from .key_manager import validate_key
+from .key_manager import sort_key_strings_hierarchically, validate_key
 
 import logging
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ def compress(s: str) -> str:
         return s
     return COMPRESSION_PATTERN.sub(lambda m: m.group(1) + str(len(m.group())), s)
 
-#@cached("grid_decompress", key_func=lambda s: f"decompress:{s}")
+@cached("grid_decompress", key_func=lambda s: f"decompress:{s}")
 def decompress(s: str) -> str:
     """
     Decompress a Run-Length Encoded dependency string with caching.
@@ -74,9 +74,9 @@ def decompress(s: str) -> str:
         else: result += s[i]; i += 1
     return "".join(result)
 
-# --- Grid Creation (No changes needed) ---
-# @cached("initial_grids",
-#        key_func=lambda keys: f"initial_grid:{':'.join(keys)}")
+# --- Grid Creation ---
+@cached("initial_grids",
+       key_func=lambda keys: f"initial_grid:{':'.join(sort_key_strings_hierarchically(keys))}")
 def create_initial_grid(keys: List[str]) -> Dict[str, str]:
     """
     Create an initial dependency grid with placeholders and diagonal markers.
@@ -157,8 +157,8 @@ def set_char_at(s: str, index: int, new_char: str) -> str:
 
 # --- Grid Validation ---
 # <<< *** MODIFIED SORTING *** >>>
-# @cached("grid_validation", # Caching needs careful review if inputs change frequently or if side effects (logging) matter
-#        key_func=lambda grid, keys: f"validate_grid:{hash(str(sorted(grid.items())))}:{':'.join(keys)}")
+@cached("grid_validation", # Caching needs careful review if inputs change frequently or if side effects (logging) matter
+       key_func=lambda grid, keys: f"validate_grid:{hash(str(sorted(grid.items())))}:{':'.join(sort_key_strings_hierarchically(keys))}") # Use hierarchical sort for keys part
 def validate_grid(grid: Dict[str, str], sorted_keys_list: List[str]) -> bool:
     """
     Validate a dependency grid for consistency with keys.
@@ -272,8 +272,9 @@ def remove_dependency_from_grid(grid: Dict[str, str], source_key: str, target_ke
     invalidate_dependent_entries('grid_validation', f"validate_grid:{hash(str(sorted(new_grid.items())))}:{':'.join(keys)}")
     return new_grid
 
-# --- Dependency Retrieval (No changes needed) ---
-# @cached("grid_dependencies", ...)
+# --- Dependency Retrieval ---
+@cached("grid_dependencies",
+        key_func=lambda grid, key, keys: f"grid_deps:{hash(str(sorted(grid.items())))}:{key}:{':'.join(sort_key_strings_hierarchically(keys))}") # Use hierarchical sort for keys part
 def get_dependencies_from_grid(grid: Dict[str, str], key: str, keys: List[str]) -> Dict[str, List[str]]:
     """
     Get dependencies for a specific key, categorized by relationship type.

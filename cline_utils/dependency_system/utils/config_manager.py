@@ -190,8 +190,8 @@ class ConfigManager:
         """
         from .cache_manager import cached
 
-        # @cached("config_data",
-        #         key_func=lambda self: f"config:{os.path.getmtime(self.config_path) if os.path.exists(self.config_path) else 'missing'}")
+        @cached("config_data",
+                key_func=lambda self: f"config:{os.path.getmtime(self.config_path) if os.path.exists(self.config_path) else 'missing'}")
         def _get_config(self) -> Dict[str, Any]:
             if self._config is None:
                 self._load_config()
@@ -209,8 +209,6 @@ class ConfigManager:
         """
         from .cache_manager import cached
 
-        # @cached("config_path",
-        #         key_func=lambda self: f"config_path:{normalize_path(get_project_root())}")
         def _get_config_path(self) -> str:
             if self._config_path is None:
                 project_root = get_project_root()
@@ -276,8 +274,8 @@ class ConfigManager:
         """
         from .cache_manager import cached
 
-        # @cached("excluded_dirs",
-        #         key_func=lambda self: f"excluded_dirs:{os.path.getmtime(self.config_path) if os.path.exists(self.config_path) else 'missing'}")
+        @cached("excluded_dirs",
+                key_func=lambda self: f"excluded_dirs:{os.path.getmtime(self.config_path) if os.path.exists(self.config_path) else 'missing'}")
         def _get_excluded_dirs(self) -> List[str]:
             return self.config.get("excluded_dirs", DEFAULT_CONFIG["excluded_dirs"])
 
@@ -292,8 +290,8 @@ class ConfigManager:
         """
         from .cache_manager import cached
 
-        # @cached("excluded_extensions",
-        #         key_func=lambda self: f"excluded_extensions:{os.path.getmtime(self.config_path) if os.path.exists(self.config_path) else 'missing'}")
+        @cached("excluded_extensions",
+                key_func=lambda self: f"excluded_extensions:{os.path.getmtime(self.config_path) if os.path.exists(self.config_path) else 'missing'}")
         def _get_excluded_extensions(self) -> List[str]:
             return self.config.get("excluded_extensions", DEFAULT_CONFIG["excluded_extensions"])
 
@@ -308,8 +306,8 @@ class ConfigManager:
         """
         from .cache_manager import cached
 
-        # @cached("excluded_paths",
-        #         key_func=lambda self: f"excluded_paths:{os.path.getmtime(self.config_path) if os.path.exists(self.config_path) else 'missing'}")
+        @cached("excluded_paths",
+                key_func=lambda self: f"excluded_paths:{os.path.getmtime(self.config_path) if os.path.exists(self.config_path) else 'missing'}")
         def _get_excluded_paths(self) -> List[str]:
             # Retrieve excluded_paths from config, defaulting to DEFAULT_CONFIG value
             excluded_paths_config = self.config.get("excluded_paths", DEFAULT_CONFIG["excluded_paths"])
@@ -387,8 +385,8 @@ class ConfigManager:
         """
         from .cache_manager import cached
 
-        # @cached("code_roots",
-        #         key_func=lambda self: f"code_roots:{os.path.getmtime(os.path.join(get_project_root(), '.clinerules')) if os.path.exists(os.path.join(get_project_root(), '.clinerules')) else 'missing'}")
+        @cached("code_roots",
+                key_func=lambda self: f"code_roots:{os.path.getmtime(os.path.join(get_project_root(), '.clinerules')) if os.path.exists(os.path.join(get_project_root(), '.clinerules')) else 'missing'}")
         def _get_code_root_directories(self) -> List[str]:
             clinerules_path = os.path.join(get_project_root(), ".clinerules")
             code_root_dirs = []
@@ -428,8 +426,8 @@ class ConfigManager:
         """
         from .cache_manager import cached
 
-        # @cached("doc_dirs",
-        #         key_func=lambda self: f"doc_dirs:{os.path.getmtime(os.path.join(get_project_root(), '.clinerules')) if os.path.exists(os.path.join(get_project_root(), '.clinerules')) else 'missing'}")
+        @cached("doc_dirs",
+                key_func=lambda self: f"doc_dirs:{os.path.getmtime(os.path.join(get_project_root(), '.clinerules')) if os.path.exists(os.path.join(get_project_root(), '.clinerules')) else 'missing'}")
         def _get_doc_directories(self) -> List[str]:
             clinerules_path = os.path.join(get_project_root(), ".clinerules")
             doc_dirs = []

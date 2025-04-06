@@ -246,7 +246,6 @@ def check_file_modified(file_path: str) -> bool:
         return True
     return False
 
-# @cached('file_type_cache', key_func=lambda file_path: f"file_type:{normalize_path(file_path)}:{os.path.getmtime(file_path) if os.path.exists(file_path) else 'missing'}")
 def get_file_type_cached(file_path: str) -> str:
     """Cached version of get_file_type."""
     from .path_utils import get_file_type

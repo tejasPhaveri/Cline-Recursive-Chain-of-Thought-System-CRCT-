@@ -20,6 +20,7 @@ from cline_utils.dependency_system.utils.cache_manager import cached, invalidate
 from cline_utils.dependency_system.core.key_manager import (
     KeyInfo, # Added
     validate_key,
+    sort_key_strings_hierarchically, # Import the correct sorting function
     # generate_keys is typically called *before* this, not needed here
 )
 # from cline_utils.dependency_system.io.tracker_io import read_tracker_file, write_tracker_file # Not used directly here
@@ -102,10 +103,7 @@ def _preprocess_content_for_embedding(file_path: str, content: str) -> str:
 
 # --- Embedding Generation ---
 # <<< *** MODIFIED SIGNATURE AND LOGIC *** >>>
-#@cached("embeddings_generation",
-#        key_func=lambda project_paths, force=False:
-#        f"generate_embeddings:{':'.join(normalize_path(p) for p in project_paths)}:{force}:"
-#        f"{os.path.getmtime(ConfigManager().config_path)}")
+# Caching removed due to complexity and risk of stale data; relies on internal checks.
 def generate_embeddings(project_paths: List[str],
                         path_to_key_info: Dict[str, KeyInfo], # Changed from global_key_map
                         force: bool = False) -> bool:
@@ -285,9 +283,42 @@ def generate_embeddings(project_paths: List[str],
     else: logger.warning(f"Embedding generation completed with errors for paths: {project_paths}")
     return overall_success
 
+# --- Similarity Calculation Helper ---
+# Add code_roots and doc_roots to signature to match calculate_similarity arguments passed by @cached
+def _get_similarity_cache_key(key1_str: str, key2_str: str, embeddings_dir: str,
+                              path_to_key_info: Dict[str, KeyInfo], project_root: str,
+                              code_roots: List[str], doc_roots: List[str], **kwargs) -> str:
+    """Generates a cache key for calculate_similarity, including .npy mtimes."""
+    norm_embeddings_dir = normalize_path(embeddings_dir)
+    norm_project_root = normalize_path(project_root)
+
+    def get_npy_mtime(key_str: str) -> float:
+        """Gets the mtime of the .npy file for a key, or 0 if not found."""
+        key_info = next((info for info in path_to_key_info.values() if info.key_string == key_str), None)
+        if not key_info or not key_info.norm_path.startswith(norm_project_root):
+            return 0.0
+        try:
+            relative_file_path = os.path.relpath(key_info.norm_path, norm_project_root)
+            npy_path = normalize_path(os.path.join(norm_embeddings_dir, relative_file_path) + ".npy")
+            if os.path.exists(npy_path):
+                return os.path.getmtime(npy_path)
+            else:
+                return 0.0
+        except (ValueError, OSError):
+            return 0.0 # Error calculating path or getting mtime
+
+    # Sort keys to ensure consistent key order
+    # Use hierarchical sorting for key strings
+    sorted_keys = sort_key_strings_hierarchically([key1_str, key2_str])
+    mtime1 = get_npy_mtime(sorted_keys[0])
+    mtime2 = get_npy_mtime(sorted_keys[1])
+
+    return f"similarity:{sorted_keys[0]}:{sorted_keys[1]}:{norm_embeddings_dir}:{mtime1}:{mtime2}"
+
 # --- Similarity Calculation ---
 # <<< *** MODIFIED SIGNATURE AND LOGIC *** >>>
-# @cached(...) # Cache key needs careful review if path_to_key_info changes structure
+@cached("similarity_calculation",
+        key_func=_get_similarity_cache_key) # Use helper function for key generation
 def calculate_similarity(key1_str: str, # Renamed for clarity
                          key2_str: str, # Renamed for clarity
                          embeddings_dir: str,
@@ -375,8 +406,8 @@ def calculate_similarity(key1_str: str, # Renamed for clarity
         logger.exception(f"Failed similarity calc for {key1_str} & {key2_str}: {e}"); return 0.0
 
 # --- File Validation Helper ---
-# @cached("file_validation",
-#        key_func=lambda file_path: f"is_valid_file:{normalize_path(file_path)}:{os.path.getmtime(ConfigManager().config_path)}")
+@cached("file_validation",
+       key_func=lambda file_path: f"is_valid_file:{normalize_path(file_path)}:{os.path.getmtime(ConfigManager().config_path)}")
 def _is_valid_file(file_path: str) -> bool:
     """
     Check if a file is valid for embedding generation.
