@@ -26,7 +26,7 @@ from cline_utils.dependency_system.utils.config_manager import ConfigManager
 from cline_utils.dependency_system.utils.cache_manager import clear_all_caches, file_modified, invalidate_dependent_entries # Added invalidate
 from cline_utils.dependency_system.analysis.dependency_analyzer import analyze_file
 # Added for show-dependencies
-from cline_utils.dependency_system.core.key_manager import generate_keys, KeyInfo, KeyGenerationError, validate_key
+from cline_utils.dependency_system.core.key_manager import generate_keys, KeyInfo, KeyGenerationError, validate_key, sort_key_strings_hierarchically
 
 
 # Configure logging (moved to main block)
@@ -273,9 +273,17 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
     memory_dir_rel = config.get_path('memory_dir')
     if not memory_dir_rel: print("Error: memory_dir not configured."); return 1
     memory_dir_abs = normalize_path(os.path.join(project_root, memory_dir_rel))
-    main_tracker_abs = normalize_path(os.path.join(memory_dir_abs, config.get_path("main_tracker_filename", "module_relationship_tracker.md")))
-    doc_tracker_abs = normalize_path(os.path.join(memory_dir_abs, config.get_path("doc_tracker_filename", "doc_tracker.md")))
+    # <<< Add detailed logging for path construction >>>
+    logger.debug(f"Path Components: project_root='{project_root}', memory_dir_rel='{memory_dir_rel}', calculated memory_dir_abs='{memory_dir_abs}'")
+    # Directly use the absolute path returned by ConfigManager
+    main_tracker_abs = config.get_path("main_tracker_filename", os.path.join(memory_dir_abs, "module_relationship_tracker.md")) # Provide default path construction if key missing
+    logger.debug(f"Using main_tracker_abs from config (or default): '{main_tracker_abs}'")
+    # Directly use the absolute path returned by ConfigManager
+    doc_tracker_abs = config.get_path("doc_tracker_filename", os.path.join(memory_dir_abs, "doc_tracker.md")) # Provide default path construction if key missing
+    logger.debug(f"Using doc_tracker_abs from config (or default): '{doc_tracker_abs}'")
+    logger.debug(f"Checking existence of main tracker: '{main_tracker_abs}' -> {os.path.exists(main_tracker_abs)}")
     if os.path.exists(main_tracker_abs): all_tracker_paths.add(main_tracker_abs)
+    logger.debug(f"Checking existence of doc tracker: '{doc_tracker_abs}' -> {os.path.exists(doc_tracker_abs)}")
     if os.path.exists(doc_tracker_abs): all_tracker_paths.add(doc_tracker_abs)
     code_roots_rel = config.get_code_root_directories()
     for code_root_rel in code_roots_rel:
@@ -293,7 +301,7 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
 
             local_keys_map = tracker_data["keys"] # Key string -> Path string (local defs)
             grid = tracker_data["grid"]
-            sorted_keys_local = sorted(list(local_keys_map.keys())) # Local sort order
+            sorted_keys_local = sort_key_strings_hierarchically(list(local_keys_map.keys())) # Use hierarchical sort
 
             if target_key_str in local_keys_map:
                 logger.debug(f"Analyzing dependencies for '{target_key_str}' in {os.path.basename(tracker_path)}...")
@@ -323,8 +331,20 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
         print(f"\n{section_title}:")
         dep_set = all_dependencies_by_type.get(dep_char)
         if dep_set:
-            # Sort by key string using standard sort
-            sorted_deps = sorted(list(dep_set), key=lambda item: item[0])
+            # Define helper for hierarchical sorting within the print loop
+            def _hierarchical_sort_key_func(key_str: str):
+                import re # Import re locally if not globally available
+                KEY_PATTERN = r'\d+|\D+' # Pattern from key_manager
+                if not key_str or not isinstance(key_str, str): return []
+                parts = re.findall(KEY_PATTERN, key_str)
+                try:
+                    return [(int(p) if p.isdigit() else p) for p in parts]
+                except (ValueError, TypeError): # Fallback
+                    logger.warning(f"Could not convert parts for sorting display key '{key_str}'")
+                    return parts
+
+            # Sort by key string using hierarchical sort helper
+            sorted_deps = sorted(list(dep_set), key=lambda item: _hierarchical_sort_key_func(item[0]))
             for dep_key, dep_path in sorted_deps: print(f"  - {dep_key}: {dep_path}")
         else: print("  None")
     print("\n------------------------------------------")
