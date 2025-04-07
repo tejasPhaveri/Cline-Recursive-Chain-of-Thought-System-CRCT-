@@ -10,7 +10,7 @@ import logging
 
 # Import necessary functions from other modules
 from cline_utils.dependency_system.core.dependency_grid import decompress, PLACEHOLDER_CHAR, DIAGONAL_CHAR
-from cline_utils.dependency_system.core.key_manager import KeyInfo, sort_keys, get_key_from_path
+from cline_utils.dependency_system.core.key_manager import KeyInfo, sort_keys, get_key_from_path, sort_key_strings_hierarchically
 from cline_utils.dependency_system.utils.path_utils import is_subpath, normalize_path, join_paths, get_project_root
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
 
@@ -152,7 +152,7 @@ def aggregate_dependencies_contextual(
 
             if not mini_grid or not mini_keys_defined: logger.debug(f"Mini tracker {os.path.basename(mini_tracker_path)} grid/keys empty."); continue
             # Get the list of key strings defined in this mini-tracker and sort them simply
-            mini_grid_key_strings = sorted(list(mini_keys_defined.keys()))
+            mini_grid_key_strings = sort_key_strings_hierarchically(list(mini_keys_defined.keys()))
             # Note: If natural sort order (like key_manager.sort_keys) is TRULY needed
             # for string keys here, a separate natural sort utility would be required.
             # Standard sort is usually sufficient for grid consistency.

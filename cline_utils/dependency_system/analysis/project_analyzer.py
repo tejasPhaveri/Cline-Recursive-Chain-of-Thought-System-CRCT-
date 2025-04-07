@@ -366,16 +366,18 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
                           # Add the new reciprocal dependency
                           logger.debug(f"Reciprocal: Adding {target_key} -> {source_key} ('{reciprocal_char}') based on {source_key}->{target_key} ('{dep_char}')")
                           target_suggestions.append((source_key, reciprocal_char))
-                     elif reciprocal_priority == existing_priority and existing_char_in_target != reciprocal_char:
-                          # If priorities are equal and chars are opposing direct dependencies (< vs >), make it mutual 'x'
-                          if {existing_char_in_target, reciprocal_char} == {'<', '>'}:
-                               if existing_char_in_target != 'x':
-                                    # Update target -> source to 'x'
-                                    target_suggestions[:] = [(t, 'x' if t == source_key else c) for t, c in target_suggestions]
-                                    logger.debug(f"Reciprocal: Merging {target_key} -> {source_key} to 'x' due to opposing '{existing_char_in_target}' and '{reciprocal_char}'")
-                                    # Also update the original source -> target to 'x'
-                                    current_source_suggestions_for_update = all_suggestions.get(source_key, []) # Refetch
-                                    current_source_suggestions_for_update[:] = [(orig_t, 'x' if orig_t == target_key else orig_c) for orig_t, orig_c in current_source_suggestions_for_update]
+                     # MERGE to 'x' if mutual dependency (A->B='<' AND B->A='<') is found
+                     elif dep_char == '<' and existing_char_in_target == '<': # Check for matching '<' in both directions
+                          if existing_char_in_target != 'x': # Avoid re-merging 'x'
+                               # Update target -> source (B -> A) to 'x'
+                               target_suggestions[:] = [(t, 'x' if t == source_key else c) for t, c in target_suggestions]
+                               logger.debug(f"Mutual: Merging {target_key} -> {source_key} to 'x' due to matching '<' dependencies.") # Updated log
+
+                               # Also update the original source -> target (A -> B) to 'x'
+                               current_source_suggestions_for_update = all_suggestions.get(source_key, []) # Refetch
+                               if current_source_suggestions_for_update: # Check if list exists before modifying
+                                  current_source_suggestions_for_update[:] = [(orig_t, 'x' if orig_t == target_key else orig_c) for orig_t, orig_c in current_source_suggestions_for_update]
+                                  logger.debug(f"Mutual: Merging {source_key} -> {target_key} to 'x' due to matching '<' dependencies.") # Updated log
 
                           # else: Keep existing for other equal priority conflicts
         results["dependency_suggestion"]["status"] = "success"

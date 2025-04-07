@@ -234,7 +234,10 @@ def add_dependency_to_grid(grid: Dict[str, str], source_key: str, target_key: st
     source_idx = keys.index(source_key)
     target_idx = keys.index(target_key)
     if source_idx == target_idx:
-        return grid
+        # Diagonal elements ('o') cannot be changed directly.
+        # Grid validation ensures they are 'o'.
+        # This prevents accidental overwrites and maintains grid integrity.
+        raise ValueError(f"Cannot directly modify diagonal element for key '{source_key}'. Self-dependency must be 'o'.")
 
     # Create a copy of the grid to avoid modifying the original
     new_grid = grid.copy()

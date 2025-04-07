@@ -100,7 +100,7 @@ def handle_set_char(args: argparse.Namespace) -> int:
         tracker_data = read_tracker_file(args.tracker_file)
         if not tracker_data or not tracker_data.get("keys"): print(f"Error: Could not read tracker: {args.tracker_file}"); return 1
         if args.key not in tracker_data["keys"]: print(f"Error: Key {args.key} not found"); return 1
-        sorted_keys = sorted(list(tracker_data["keys"].keys())) # Use standard sort
+        sorted_keys = sort_key_strings_hierarchically(list(tracker_data["keys"].keys())) # Use hierarchical sort
         # Check index validity against sorted list length
         if not (0 <= args.index < len(sorted_keys)): print(f"Error: Index {args.index} out of range for {len(sorted_keys)} keys."); return 1
         # Check char validity (optional, could rely on set_char_at)
@@ -147,7 +147,7 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
         if args.dep_type not in ALLOWED_DEP_TYPES: print(f"Error: Invalid dep type '{args.dep_type}'. Allowed: {', '.join(sorted(list(ALLOWED_DEP_TYPES)))}"); return 1
 
         # <<< *** MODIFIED SORTING *** >>>
-        keys = sorted(list(tracker_data["keys"].keys())) # Use standard sort
+        keys = sort_key_strings_hierarchically(list(tracker_data["keys"].keys())) # Use hierarchical sort
         if args.source_key not in keys or args.target_key not in keys: print(f"Error: Source '{args.source_key}' or target '{args.target_key}' not found in tracker"); return 1
 
         new_grid = add_dependency_to_grid(tracker_data["grid"], args.source_key, args.target_key, keys, args.dep_type)

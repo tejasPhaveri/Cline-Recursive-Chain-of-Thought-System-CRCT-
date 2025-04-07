@@ -681,50 +681,48 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
 
         logger.info(f"Mini tracker update for module {module_key_string} ({os.path.basename(module_path)}). Grid keys: {len(relevant_keys_for_grid)}.")
 
-        # Filter suggestions for FOREIGN dependencies (Source internal -> Target external OR doc)
-        filtered_suggestions_to_apply = defaultdict(list)
+        # Filter suggestions: Keep only those relevant for this mini-tracker's grid.
+        # Relevant suggestions have:
+        #   - Source internal to this module and not excluded.
+        #   - Target relevant for this tracker's grid (internal or external) and not excluded.
+        # This replaces the previous "foreign only" filtering.
         if raw_suggestions and file_to_module:
-             logger.debug(f"Filtering mini-tracker suggestions for foreign dependencies ({os.path.basename(output_file)})...")
+             logger.debug(f"Filtering mini-tracker suggestions ({os.path.basename(output_file)})...")
+             # final_suggestions_to_apply is already initialized before this block
              for src_key_str, deps in raw_suggestions.items():
+                  # Only consider suggestions WHERE THE SOURCE is internal to this module
                   if src_key_str not in internal_keys_set: continue
 
                   src_path = final_key_defs_internal.get(src_key_str) # Path comes from internal map
+                  # Skip if source is excluded
                   if not src_path or src_path in all_excluded_abs: continue
 
-                  # Find source module path (could be file or the module dir itself)
-                  src_module_path = file_to_module.get(src_path)
-                  if not src_module_path and src_path == module_path: src_module_path = module_path
-                  if not src_module_path or src_module_path != module_path: continue
-
                   for target_key_str, dep_char in deps:
+                       # Only consider suggestions WHERE THE TARGET is relevant for this tracker's grid
                        if target_key_str not in relevant_keys_for_grid: continue
+                       # Ignore self-dependencies or placeholder suggestions during application
+                       if src_key_str == target_key_str or dep_char == PLACEHOLDER_CHAR: continue
 
-                       # Find path/info for target key string from GLOBAL map
+                       # Find path/info for target key string from GLOBAL map to check exclusion
                        target_info = next((info for info in path_to_key_info.values() if info.key_string == target_key_str), None)
                        if not target_info:
-                            logger.warning(f"Mini foreign check: No path info for target key {target_key_str}. Assuming external.")
-                            filtered_suggestions_to_apply[src_key_str].append((target_key_str, dep_char)); continue
+                            # If no info, cannot check exclusion, but might still be a valid key (e.g., external lib placeholder?). Proceed cautiously.
+                            logger.warning(f"Mini filter: No path info for target key {target_key_str}. Cannot check exclusion. Adding suggestion.")
+                            final_suggestions_to_apply[src_key_str].append((target_key_str, dep_char)) # Add to the main dict
+                            continue
 
                        target_path = target_info.norm_path
-                       # Check if target is excluded
-                       if target_path in all_excluded_abs: continue
+                       # Skip if the target is excluded
+                       if target_path in all_excluded_abs:
+                           # logger.debug(f"Mini filter: Skipping excluded target {target_key_str} ({target_path})")
+                           continue
 
-                       is_foreign = False
-                       is_target_in_doc_root = any(target_path == doc_root or is_subpath(target_path, doc_root) for doc_root in abs_doc_roots)
+                       # If source is internal & non-excluded, and target is relevant & non-excluded, add the suggestion.
+                       # logger.debug(f"Mini filter: Adding suggestion {src_key_str} -> {target_key_str} ('{dep_char}')")
+                       final_suggestions_to_apply[src_key_str].append((target_key_str, dep_char)) # Add directly
 
-                       if is_target_in_doc_root:
-                            is_foreign = True
-                            # logger.debug(f"Mini foreign check: Target {target_key_str} is doc. Marking foreign.")
-                       else:
-                            target_module_path = file_to_module.get(target_path)
-                            if not target_module_path and target_info.is_directory: target_module_path = target_path
-                            if target_module_path and target_module_path != src_module_path: is_foreign = True
-                            elif not target_module_path: is_foreign = True # Unknown module, assume foreign
-
-                       if is_foreign: filtered_suggestions_to_apply[src_key_str].append((target_key_str, dep_char))
-
-        # Override final_suggestions_to_apply for mini-trackers
-        final_suggestions_to_apply = filtered_suggestions_to_apply
+        # No longer overwriting; suggestions were added directly to final_suggestions_to_apply above.
+        # final_suggestions_to_apply = filtered_suggestions_to_apply # REMOVED
     else:
         raise ValueError(f"Unknown tracker type: {tracker_type}")
 
