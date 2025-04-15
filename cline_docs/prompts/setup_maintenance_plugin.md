@@ -74,10 +74,11 @@
     *   **Review logs (`debug.txt`, `suggestions.log`)** for analysis details and suggested changes.
 
 2.  **Review and Verify Placeholders ('p') and Suggestions ('s', 'S')**:
-    *   Read the tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers).
+    *   **IMPORTANT**: Use `show-keys` or `show-dependencies` commands to inspect tracker content. **Avoid** using `read_file` on tracker files directly to save context and ensure correct parsing.
     *   For each relationship marked with 'p', 's', or 'S':
-        *   Use `show-dependencies --key <key>` to understand the context of related files.
-        *   Examine the source code or documentation of the related files (`read_file`).
+        *   Use `show-dependencies --key <key>` to understand the full context (dependencies) of related files.
+        *   *(If you only need to see the key definitions for a specific tracker, use `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker <path>` for efficiency.)*
+        *   If dependency context isn't clear from `show-dependencies`, examine the source code or documentation of the *related files* themselves using `read_file` (e.g., `read_file <path_from_show_dependencies_output>`).
         *   Determine the correct dependency relationship (or confirm 'n' - no dependency). Record the verification of s/S for that key in .clinerules [LEARNING_JOURNAL]. Refer to **IV.1 Dependency Characters**.
 
 3.  **Correct/Confirm Dependencies**:

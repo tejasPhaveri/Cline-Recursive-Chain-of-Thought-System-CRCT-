@@ -219,6 +219,8 @@ The MUP must be followed immediately after any state-changing action:
 
 Located in `cline_utils/`. **All commands are executed via `python -m cline_utils.dependency_system.dependency_processor <command> [args...]`.** Most commands return a status message upon completion.
 
+**IMPORTANT: To ensure data consistency, conserve context window tokens, and leverage built-in parsing logic, ALWAYS use the `show-keys` and `show-dependencies` commands to retrieve key definitions and dependency information. Avoid directly reading tracker files (`*_tracker.md`, `*_module.md`) for this purpose unless absolutely necessary.**
+
 **Core Commands for CRCT Workflow:**
 
 1.  **`analyze-project [<project_root>] [--output <json_path>] [--force-embeddings] [--force-analysis]`**:
@@ -238,6 +240,10 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
 4.  **`remove-file <tracker_file> <file>`**:
     *   **Purpose**: Removes a file's key, row, and column entirely from the specified `<tracker_file>`. Use when deleting or refactoring files out of existence.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor remove-file cline_docs/module_relationship_tracker.md src/utils/old_util.py`
+
+5.  **`show-keys --tracker <tracker_file_path>`**:
+    *   **Purpose**: Extracts and displays *only* the key definitions section (between `---KEY_DEFINITIONS_START---` and `---KEY_DEFINITIONS_END---`) from the specified tracker file. Useful for quickly viewing keys without loading the entire grid.
+    *   **Example**: `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker cline_docs/doc_tracker.md`
 
 **Utility Commands:**
 

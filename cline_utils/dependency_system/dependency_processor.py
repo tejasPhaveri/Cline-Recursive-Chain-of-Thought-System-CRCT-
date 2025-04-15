@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__) # Get logger for this module
 
 # --- Command Handlers ---
 
+# Constants for markers
+KEY_DEFINITIONS_START_MARKER = "---KEY_DEFINITIONS_START---"
+KEY_DEFINITIONS_END_MARKER = "---KEY_DEFINITIONS_END---"
+
 def command_handler_analyze_file(args):
     """Handle the analyze-file command."""
     import json
@@ -321,7 +325,6 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
             print(f"Warning: Error processing {tracker_path}. See debug.txt for details.")
 
     # --- Print results ---
-    # Use standard sort for displaying dependencies
     output_sections = [
         ("Mutual ('x')", 'x'), ("Documentation ('d')", 'd'), ("Semantic (Strong) ('S')", 'S'),
         ("Semantic (Weak) ('s')", 's'), ("Depends On ('<')", '<'), ("Depended On By ('>')", '>'),
@@ -349,6 +352,56 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
         else: print("  None")
     print("\n------------------------------------------")
     return 0
+
+def handle_show_keys(args: argparse.Namespace) -> int:
+    """Handle the show-keys command."""
+    tracker_path = normalize_path(args.tracker)
+    logger.info(f"Attempting to show keys from tracker: {tracker_path}")
+
+    if not os.path.exists(tracker_path):
+        print(f"Error: Tracker file not found: {tracker_path}", file=sys.stderr)
+        logger.error(f"Tracker file not found: {tracker_path}")
+        return 1
+
+    in_definitions_section = False
+    start_marker_found = False
+    end_marker_found = False
+
+    try:
+        with open(tracker_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                stripped_line = line.strip()
+                if stripped_line == KEY_DEFINITIONS_START_MARKER:
+                    in_definitions_section = True
+                    start_marker_found = True
+                    continue # Don't print the marker itself
+                elif stripped_line == KEY_DEFINITIONS_END_MARKER:
+                    in_definitions_section = False
+                    end_marker_found = True
+                    break # Stop processing after end marker
+
+                if in_definitions_section:
+                    print(line, end='') # Print the line including original newline
+
+        if not start_marker_found:
+            print(f"Warning: Start marker '{KEY_DEFINITIONS_START_MARKER}' not found in {tracker_path}", file=sys.stderr)
+            logger.warning(f"Start marker not found in {tracker_path}")
+        # Only warn about missing end marker if start marker was found
+        elif not end_marker_found:
+            print(f"Warning: End marker '{KEY_DEFINITIONS_END_MARKER}' not found after start marker in {tracker_path}. Output may be incomplete.", file=sys.stderr)
+            logger.warning(f"End marker not found after start marker in {tracker_path}")
+
+        # Success is 0 even if markers missing (warnings printed)
+        return 0
+
+    except IOError as e:
+        print(f"Error reading tracker file {tracker_path}: {e}", file=sys.stderr)
+        logger.error(f"IOError reading {tracker_path}: {e}", exc_info=True)
+        return 1
+    except Exception as e:
+        print(f"An unexpected error occurred while processing {tracker_path}: {e}", file=sys.stderr)
+        logger.error(f"Unexpected error processing {tracker_path}: {e}", exc_info=True)
+        return 1
 
 
 def main():
@@ -431,6 +484,11 @@ def main():
     show_deps_parser = subparsers.add_parser("show-dependencies", help="Show aggregated dependencies for a key")
     show_deps_parser.add_argument("--key", required=True, help="Key string to show dependencies for")
     show_deps_parser.set_defaults(func=handle_show_dependencies)
+
+    # --- Show Keys Command ---
+    show_keys_parser = subparsers.add_parser("show-keys", help="Show only the key definitions from a tracker file")
+    show_keys_parser.add_argument("--tracker", required=True, help="Path to the tracker file (.md)")
+    show_keys_parser.set_defaults(func=handle_show_keys)
 
     args = parser.parse_args()
 
