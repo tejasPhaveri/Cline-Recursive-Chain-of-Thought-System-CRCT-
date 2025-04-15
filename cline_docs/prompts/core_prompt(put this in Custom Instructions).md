@@ -2,7 +2,9 @@
 
 This outlines the fundamental principles, required files, workflow structure, and essential procedures that govern CRCT, the overarching framework within which all phases of operation function. Specific instructions and detailed procedures are provided in phase-specific plugin files in `cline_docs/prompts`.
 
-**Important Clarification:** The CRCT system operates in distinct *phases* (Set-up/Maintenance, Strategy, Execution), controlled **exclusively** by the `current_phase` setting in `.clinerules`. "Plan Mode" is independent of this system's *phases*. Plugin loading is *always* dictated by `current_phase`.
+**Important Clarifications:** The CRCT system operates in distinct *phases* (Set-up/Maintenance, Strategy, Execution), controlled **exclusively** by the `current_phase` setting in `.clinerules`. "Plan Mode" is independent of this system's *phases*. Plugin loading is *always* dictated by `current_phase`.
+
+The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* format. **Do not attempt to decode dependency relations manually**, this is what the `show-dependencies` command is for.
 
 ---
 
@@ -51,7 +53,7 @@ These files form the project foundation. *Must be loaded at initialization.* If 
 - **For tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers), do *not* create or modify manually. Always use the `dependency_processor.py` script as specified to ensure correct format and data consistency.**
 - For other files, create manually with minimal content if needed (e.g., a title or basic structure).
 - Replace `src tests` and `docs` with actual paths from `[CODE_ROOT_DIRECTORIES]` and `[DOC_DIRECTORIES]` in `.clinerules`.
-
+- `progress.md` contains a high-level project checklist, this will help us track the broader progress of the project.
 **`.clinerules` File Format (Example):**
 
 ```
