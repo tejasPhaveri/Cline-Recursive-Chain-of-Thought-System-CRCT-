@@ -6,7 +6,7 @@ This outlines the fundamental principles, required files, workflow structure, an
 
 The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* format. **Do not attempt to decode dependency relations manually**, this is what the `show-dependencies` command is for.
 *Do not rely on what you assume are 'p' relations in the grid. The output of `show-dependencies` is the *only* place for you to view dependency relationships.*
-
+**Example**: `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
 ---
 
 ## Mandatory Initialization Procedure
