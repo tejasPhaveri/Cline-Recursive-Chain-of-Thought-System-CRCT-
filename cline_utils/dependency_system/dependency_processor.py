@@ -146,40 +146,58 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
     try:
         tracker_data = read_tracker_file(args.tracker)
         if not tracker_data or not tracker_data.get("keys"): print(f"Error: Could not read tracker: {args.tracker}"); return 1
-        # Dependency type validation (unchanged)
+        # Dependency type validation
         ALLOWED_DEP_TYPES = {'<', '>', 'x', 'd', 'o', 'n', 'p', 's', 'S'};
         if args.dep_type not in ALLOWED_DEP_TYPES: print(f"Error: Invalid dep type '{args.dep_type}'. Allowed: {', '.join(sorted(list(ALLOWED_DEP_TYPES)))}"); return 1
 
-        # <<< *** MODIFIED SORTING *** >>>
         keys = sort_key_strings_hierarchically(list(tracker_data["keys"].keys())) # Use hierarchical sort
-        if args.source_key not in keys or args.target_key not in keys: print(f"Error: Source '{args.source_key}' or target '{args.target_key}' not found in tracker"); return 1
 
-        new_grid = add_dependency_to_grid(tracker_data["grid"], args.source_key, args.target_key, keys, args.dep_type)
-        tracker_data["grid"] = new_grid
+        # Validate source and ALL target keys
+        missing_keys = [tk for tk in args.target_key if tk not in keys]
+        if args.source_key not in keys or missing_keys:
+            error_msg = f"Error: Source key '{args.source_key}' not found." if args.source_key not in keys else ""
+            if missing_keys:
+                error_msg += f" Target key(s) not found: {', '.join(missing_keys)}"
+            print(error_msg.strip())
+            return 1
 
-        # Add reciprocal dependency if type is '<' or '>'
-        reciprocal_added = False
-        reciprocal_char = None
-        if args.dep_type == '>':
-            reciprocal_char = '<'
-            # Add dependency from target to source
-            new_grid = add_dependency_to_grid(tracker_data["grid"], args.target_key, args.source_key, keys, reciprocal_char)
-            tracker_data["grid"] = new_grid
-            reciprocal_added = True
-        elif args.dep_type == '<':
-            reciprocal_char = '>'
-            # Add dependency from target to source
-            new_grid = add_dependency_to_grid(tracker_data["grid"], args.target_key, args.source_key, keys, reciprocal_char)
-            tracker_data["grid"] = new_grid
-            reciprocal_added = True
+        grid_changed = False # Track if any change was made
+        for target_key in args.target_key: # Iterate through each target key
+            try:
+                # Add dependency from source to current target
+                new_grid = add_dependency_to_grid(tracker_data["grid"], args.source_key, target_key, keys, args.dep_type)
+                if new_grid != tracker_data["grid"]: # Check if the grid actually changed
+                    tracker_data["grid"] = new_grid
+                    grid_changed = True
 
-        tracker_data["last_grid_edit"] = f"Add {args.source_key}->{args.target_key} ({args.dep_type})"
-        if reciprocal_added and reciprocal_char:
-            tracker_data["last_grid_edit"] += f" and {args.target_key}->{args.source_key} ({reciprocal_char})"
+                # Add reciprocal dependency if type is '<' or '>'
+                reciprocal_char = None
+                if args.dep_type == '>':
+                    reciprocal_char = '<'
+                    new_grid = add_dependency_to_grid(tracker_data["grid"], target_key, args.source_key, keys, reciprocal_char)
+                    if new_grid != tracker_data["grid"]: tracker_data["grid"] = new_grid; grid_changed = True
+                elif args.dep_type == '<':
+                    reciprocal_char = '>'
+                    new_grid = add_dependency_to_grid(tracker_data["grid"], target_key, args.source_key, keys, reciprocal_char)
+                    if new_grid != tracker_data["grid"]: tracker_data["grid"] = new_grid; grid_changed = True
+
+            except ValueError as ve:
+                # Catch errors from add_dependency_to_grid (e.g., invalid keys within the function)
+                print(f"Error processing {args.source_key} -> {target_key}: {ve}")
+                return 1 # Exit on first error during processing
+
+        if not grid_changed:
+            print("No changes made to the grid.")
+            return 0 # Exit successfully if no changes were needed
+
+        # Update last edit message for batch operation
+        target_keys_str = ', '.join(args.target_key)
+        tracker_data["last_grid_edit"] = f"Batch add dependency {args.source_key} -> [{target_keys_str}] ({args.dep_type})"
+
         success = write_tracker_file(args.tracker, tracker_data["keys"], tracker_data["grid"], tracker_data.get("last_key_edit", ""), tracker_data["last_grid_edit"])
-        if success: print(f"Added dependency {args.source_key} -> {args.target_key} ({args.dep_type}) in {args.tracker}"); return 0
+        if success: print(f"Added dependencies from {args.source_key} -> {target_keys_str} ({args.dep_type}) in {args.tracker}"); return 0
         else: print(f"Error: Failed write to {args.tracker}"); return 1
-    except ValueError as e: print(f"Error: {e}"); return 1
+    except ValueError as e: print(f"Error: {e}"); return 1 # Catch errors like key not found during initial checks
     except Exception as e: logger.error(f"Error add_dependency: {e}", exc_info=True); print(f"Error: {e}"); return 1
 
 def handle_merge_trackers(args: argparse.Namespace) -> int:
@@ -465,7 +483,7 @@ def main():
     add_dep_parser = subparsers.add_parser("add-dependency", help="Add dependency between keys")
     add_dep_parser.add_argument("--tracker", required=True, help="Path to tracker file")
     add_dep_parser.add_argument("--source-key", required=True, help="Source key")
-    add_dep_parser.add_argument("--target-key", required=True, help="Target key")
+    add_dep_parser.add_argument("--target-key", required=True, nargs='+', help="One or more target keys (space-separated)")
     add_dep_parser.add_argument("--dep-type", default=">", help="Dependency type (e.g., '>', '<', 'x')")
     add_dep_parser.set_defaults(func=handle_add_dependency)
 

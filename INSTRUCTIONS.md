@@ -124,7 +124,9 @@ These instructions provide a guide to setting up and using the Cline Recursive C
    - **Dependency Inspection**:
      - The LLM will utilize the `show-dependencies --key <key>` command to inspect dependencies for a specific **contextual key**. Replace `<key>` with the desired file or module key. This command aggregates dependency information from all trackers and provides a comprehensive view of inbound and outbound dependencies, significantly simplifying dependency analysis.
    - **Manual Dependency Management**:
-     - The LLM will use `add-dependency --tracker <tracker_file> --source-key <key> --target-key <key> --dep-type <char>` to manually set dependency relationships in tracker files. This is useful for correcting or verifying suggested dependencies and for marking verified relationships. **Ensure you are using contextual keys when using this command.**
+     - The LLM will use `add-dependency --tracker <tracker_file> --source-key <key> --target-key <key1> [<key2>...] --dep-type <char>` to manually set dependency relationships in tracker files. This is useful for correcting or verifying suggested dependencies and for marking verified relationships. **Ensure you are using contextual keys when using this command.**
+       *(Note: --target-key accepts multiple keys. The specified `--dep-type` is applied to *all* targets.)*
+       *(Recommendation: Specify no more than five target keys at once for clarity.)*
      - The LLM will use `remove-key --tracker <tracker_file> --key <key>` to remove a key and its associated data from a tracker file, typically used when files are deleted or refactored. **Ensure you are using contextual keys when using this command.**
 
    **Dependency Characters for Manual Management:**

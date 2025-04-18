@@ -236,10 +236,12 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
             *   **The key used with `show-dependencies` is the *row*, the dependencies returned are the *column*.**
             *   When reviewing the output the keys listed are the *column* keys that have a dependency with the *row* key you provided to the `show-dependencies` command.
             
-3.  **`add-dependency --tracker <tracker_file> --source-key <key> --target-key <key> [--dep-type <char>]`**:
-    *   **Purpose**: Manually sets a specific dependency relationship character ('<', '>', 'x', 'd', 's', 'S', 'n', 'p') between two keys in the specified `<tracker_file>`. Use this to correct suggestions from `analyze-project` or to explicitly mark verified relationships (including 'n' for no dependency).
-    *   **Example (Set dependency)**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd --dep-type ">"`
-    *   **Example (Set NO dependency)**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd --dep-type "n"`
+3.  **`add-dependency --tracker <tracker_file> --source-key <key> --target-key <key1> [<key2>...] --dep-type <char>`**:
+    *   **Purpose**: Manually sets the **same** specified dependency relationship character (`--dep-type`) between **one** source key and **one or more** target keys in the specified `<tracker_file>`. Use this to correct suggestions from `analyze-project` or to explicitly mark verified relationships (including 'n' for no dependency).
+    *   **Example (Set dependency for multiple targets)**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd 1Be --dep-type ">"`
+    *   **Example (Set NO dependency for single target)**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd --dep-type "n"`
+    *   *(Note: This command applies the *single* `--dep-type` to *all* specified target keys relative to the source key.)*
+    *   *(Recommendation: Specify no more than five target keys at once for clarity.)*
 
 4.  **`remove-file <tracker_file> <file>`**:
     *   **Purpose**: Removes a file's key, row, and column entirely from the specified `<tracker_file>`. Use when deleting or refactoring files out of existence.

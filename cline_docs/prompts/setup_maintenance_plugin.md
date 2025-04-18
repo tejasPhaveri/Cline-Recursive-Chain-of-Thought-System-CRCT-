@@ -88,16 +88,17 @@
 
 3.  **Correct/Confirm Dependencies**:
     *   If a 'p', 's', or 'S' needs to be changed to a specific relationship ('<', '>', 'x', 'd', 'n'):
-        *   Use `add-dependency` to set the correct character.
+        *   Use `add-dependency` to set the correct character. This command can now accept multiple target keys.
         ```bash
-        # Example: Set dependency between 2Aa and 3Aad in main tracker
-        `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aad --dep-type ">"`
+        # Example: Set dependency between 2Aa and multiple targets (3Aa, 3Ab) in main tracker
+        `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aa 3Ab --dep-type ">"`
         
-        # Example: Set NO dependency ('n') between 2Aa and 3Aad
-        `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aad --dep-type "n"`
+        # Example: Set NO dependency ('n') between 2Aa and a single target 3Aa
+        `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aa --dep-type "n"`
         ```
+        *(Note: --target-key accepts multiple keys. The specified `--dep-type` is applied to *all* targets.)*
+        *(Recommendation: Specify no more than five target keys at once for clarity.)*
     *   If a suggested relationship ('<', '>', 'x', 'd') seems incorrect, use `add-dependency` to set the correct character (e.g., 'n' if there's no dependency, or '<' if the direction is wrong).
-
 4.  **Iterate and Complete**: Repeat steps 2 and 3 until no 'p' placeholders remain in the primary trackers (`module_relationship_tracker.md`, `doc_tracker.md`). Prioritize clearing these before moving to Strategy phase. Mini-tracker verification can continue iteratively.
 
 5.  **MUP**: Apply Core MUP and Section VII additions after each verification/correction session and upon completion of primary tracker verification.
