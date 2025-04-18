@@ -2,11 +2,12 @@
 
 This outlines the fundamental principles, required files, workflow structure, and essential procedures that govern CRCT, the overarching framework within which all phases of operation function. Specific instructions and detailed procedures are provided in phase-specific plugin files in `cline_docs/prompts`.
 
-**Important Clarifications:** The CRCT system operates in distinct *phases* (Set-up/Maintenance, Strategy, Execution), controlled **exclusively** by the `current_phase` setting in `.clinerules`. "Plan Mode" is independent of this system's *phases*. Plugin loading is *always* dictated by `current_phase`.
+**Important Clarifications:** The CRCT system operates in distinct *phases* (Set-up/Maintenance, Strategy, Execution), controlled **exclusively** by the `current_phase` setting in `.clinerules`. "Plan Mode" or any other "Mode" is independent of this system's *phases*. Plugin loading is *always* dictated by `current_phase`.
 
 The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* format. **Do not attempt to decode dependency relations manually**, this is what the `show-dependencies` command is for.
 *Do not rely on what you assume are 'p' relations in the grid. The output of `show-dependencies` is the *only* place for you to view dependency relationships.*
 **Example**: `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
+
 ---
 
 ## Mandatory Initialization Procedure
@@ -231,7 +232,10 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
 2.  **`show-dependencies --key <key>`**:
     *   **Purpose**: Displays all known outgoing and incoming dependencies (with paths) for a specific `<key>` by searching across *all* tracker files (main, doc, mini). Essential for understanding context before modifying a file.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
-
+        *   **IMPORTANT**:    
+            *   **The key used with `show-dependencies` is the *row*, the dependencies returned are the *column*.**
+            *   When reviewing the output the keys listed are the *column* keys that have a dependency with the *row* key you provided to the `show-dependencies` command.
+            
 3.  **`add-dependency --tracker <tracker_file> --source-key <key> --target-key <key> [--dep-type <char>]`**:
     *   **Purpose**: Manually sets a specific dependency relationship character ('<', '>', 'x', 'd', 's', 'S', 'n', 'p') between two keys in the specified `<tracker_file>`. Use this to correct suggestions from `analyze-project` or to explicitly mark verified relationships (including 'n' for no dependency).
     *   **Example (Set dependency)**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd --dep-type ">"`

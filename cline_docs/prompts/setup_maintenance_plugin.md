@@ -77,7 +77,9 @@
     *   **IMPORTANT**: Use `show-keys` or `show-dependencies` commands to inspect tracker content. **Avoid** using `read_file` on tracker files directly to save context and ensure correct parsing.
     *   For each relationship marked with 'p', 's', or 'S':
         *   Use `show-dependencies --key <key>` to understand the full context (dependencies) of related files.
-            *   The key used with `show-dependencies` is the *row*, the dependencies returned are the *column*.
+        *   **IMPORTANT**:    
+            *   **The key used with `show-dependencies` is the *row*, the dependencies returned are the *column*.**
+            *   When reviewing the output the keys listed are the *column* keys that have a dependency with the *row* key you provided to the `show-dependencies` command.
         *   *(If you only need to see the key definitions for a specific tracker, use `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker <path>` for efficiency.)*
         *   If dependency context isn't clear from `show-dependencies`, examine the source code or documentation of the *related files* themselves using `read_file` (e.g., `read_file <path_from_show_dependencies_output>`).
         *   **Note:** If `show-dependencies` lists keys that are not present in the tracker you are currently inspecting (e.g., code file keys in `doc_tracker.md`), these dependencies belong in a different tracker (like `module_relationship_tracker.md` or mini-trackers) and should be addressed there. Do not attempt to set these dependencies in the current tracker.
