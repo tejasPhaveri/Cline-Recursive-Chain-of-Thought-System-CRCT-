@@ -156,7 +156,26 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
 
         new_grid = add_dependency_to_grid(tracker_data["grid"], args.source_key, args.target_key, keys, args.dep_type)
         tracker_data["grid"] = new_grid
+
+        # Add reciprocal dependency if type is '<' or '>'
+        reciprocal_added = False
+        reciprocal_char = None
+        if args.dep_type == '>':
+            reciprocal_char = '<'
+            # Add dependency from target to source
+            new_grid = add_dependency_to_grid(tracker_data["grid"], args.target_key, args.source_key, keys, reciprocal_char)
+            tracker_data["grid"] = new_grid
+            reciprocal_added = True
+        elif args.dep_type == '<':
+            reciprocal_char = '>'
+            # Add dependency from target to source
+            new_grid = add_dependency_to_grid(tracker_data["grid"], args.target_key, args.source_key, keys, reciprocal_char)
+            tracker_data["grid"] = new_grid
+            reciprocal_added = True
+
         tracker_data["last_grid_edit"] = f"Add {args.source_key}->{args.target_key} ({args.dep_type})"
+        if reciprocal_added and reciprocal_char:
+            tracker_data["last_grid_edit"] += f" and {args.target_key}->{args.source_key} ({reciprocal_char})"
         success = write_tracker_file(args.tracker, tracker_data["keys"], tracker_data["grid"], tracker_data.get("last_key_edit", ""), tracker_data["last_grid_edit"])
         if success: print(f"Added dependency {args.source_key} -> {args.target_key} ({args.dep_type}) in {args.tracker}"); return 0
         else: print(f"Error: Failed write to {args.tracker}"); return 1
