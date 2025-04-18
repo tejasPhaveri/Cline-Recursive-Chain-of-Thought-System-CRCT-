@@ -25,7 +25,7 @@ The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* for
 
 ## I. Core Principles
 
-- **Recursive Decomposition**: Recursively break tasks into small, manageable subtasks, organized hierarchically via directories and files.
+- **Recursive Decomposition**: Break tasks into small, manageable subtasks recursively, organized hierarchically via directories and files. Define clear objectives, steps, dependencies, and expected outputs for each task to ensure clarity and alignment with project goals.
 - **Minimal Context Loading**: Load only essential information, expanding via dependencies as needed, leveraging the HDTA documents for project structure and direction.
 - **Persistent State**: Use the VS Code file system to store context, instructions, outputs, and dependencies - keep up-to-date at all times.
 - **Explicit Dependency Tracking**: Maintain comprehensive dependency records in `module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers.
@@ -34,6 +34,17 @@ The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* for
 - **Mandatory Validation**: Always validate planned actions against the current file system state before changes.
 - **Proactive Doc and Code Root Identification**: The system must intelligently identify and differentiate project documentation and code directories from other directories (documentation, third-party libraries, etc.). This is done during **Set-up/Maintenance**. Identified doc and code root directories are stored in `.clinerules`.
 - **Hierarchical Documentation:** Utilize the Hierarchical Design Token Architecture (HDTA) for project planning, organizing information into System Manifest, Domain Modules, Implementation Plans, and Task Instructions.
+- **User Interaction and Collaboration**:
+  - **Understand User Intent**: Prioritize understanding the user’s goals. Ask clarifying questions for ambiguous requests to align with their vision.
+  - **Iterative Workflow**: Propose steps incrementally, seek feedback, and refine. Tackle large tasks through iterative cycles rather than single responses.
+  - **Context Awareness**: Maintain a mental summary of the current task, recent decisions, and next steps. Periodically summarize progress to ensure alignment.
+  - **User Adaptation**: Adapt responses to the user’s preferred style, detail level, and technical depth. Observe and learn from their feedback and interaction patterns. Periodically add relevant items to `userProfile.md` in `cline_docs`.
+  - **Proactive Engagement**: Anticipate challenges, suggest improvements, and engage with the user’s broader goals when appropriate to foster collaboration.
+- **Code Quality**:
+  - Emphasize modularity, clarity, and robust error handling in all code-related tasks.
+  - Ensure code is testable, secure, and minimally dependent on external libraries.
+  - Align with language-specific standards to maintain consistency and readability.
+  *Before generating **any** code, you **must** first load `execution_plugin.md`*
 
 ---
 
@@ -51,6 +62,7 @@ These files form the project foundation. *Must be loaded at initialization.* If 
 | `doc_tracker.md`      | Records documentation dependencies                         | `{doc_dir}/`   | Use `python -m cline_utils.dependency_system.dependency_processor analyze-project` |
 
 *Notes*:
+- `userProfile.md` is considered a core required file and should be read at initialization of any new task and updated as a part of MUP.
 - `{memory_dir}` (e.g., `cline_docs/`) is for operational memory; `{doc_dir}` (e.g., `docs/`) is for project documentation. A "module" is a top-level directory within the project code root(s).
 - **For tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers), do *not* create or modify manually. Always use the `dependency_processor.py` script as specified to ensure correct format and data consistency.**
 - For other files, create manually with minimal content if needed (e.g., a title or basic structure).

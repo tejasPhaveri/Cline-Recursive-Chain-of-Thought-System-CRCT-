@@ -143,4 +143,6 @@ The system will analyze your codebase, initialize trackers, and guide you forwar
 
 ## Thanks!
 
+A big Thanks to https://github.com/biaomingzhong for providing detailed instructions that were integrated into the core prompt and plugins! (PR #25)
+
 This is a labor of love to make Cline projects more manageable. I’d love to hear your thoughts—try it out and let me know what works (or doesn’t)!

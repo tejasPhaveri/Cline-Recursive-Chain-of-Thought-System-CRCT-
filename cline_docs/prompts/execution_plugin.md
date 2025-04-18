@@ -82,9 +82,32 @@
    - Resolve by revising steps, dependencies, or seeking clarification.
    - Record resolution or next steps.
    - Apply MUP post-resolution.
-3. **Incremental Execution**: Execute steps sequentially, verifying, acting, and documenting.
+3. **Code Generation and Modification Guidelines:**
+When generating or modifying code, adhere to the following standards to ensure quality, maintainability, and security:
+  1. **Modularity**:
+    - Write small, single-purpose functions/methods and classes/modules with high cohesion and low coupling.
+    - Design reusable components to enhance maintainability.
+  2. **Clarity and Readability**:
+    - Use meaningful names for variables, functions, and classes.
+    - Follow language-specific formatting conventions (e.g., PEP 8 for Python).
+    - Add comments only for complex logic or intent, avoiding redundant explanations of *what* the code does.
+    - Include necessary imports and setup in code examples unless a snippet is requested.
+  3. **Error Handling**:
+    - Anticipate errors (e.g., invalid inputs, file not found) and implement robust handling (e.g., try-except, return value checks).
+    - Validate inputs and assumptions to prevent errors early.
+  4. **Efficiency**:
+    - Prioritize clarity and correctness but be mindful of algorithmic complexity for performance-critical tasks.
+  5. **Documentation**:
+    - Add docstrings or comments for public APIs or complex functions, detailing purpose, parameters, and return values.
+    - Keep documentation concise and synchronized with code changes.
+  6. **Testing**:
+    - Write testable code and, where applicable, suggest or include unit tests for new functionality or fixes.
+  7. **Dependency Management**:
+    - Minimize external dependencies and justify their inclusion when necessary.
+  8. **Security**:
+    - Follow secure coding practices to mitigate vulnerabilities (e.g., avoid injection risks, secure credential handling).
+4. **Execution Flowchart**
 
-### III.4 Execution Flowchart
 ```mermaid
 flowchart TD
 A[Start Step] --> B[Understand Step]

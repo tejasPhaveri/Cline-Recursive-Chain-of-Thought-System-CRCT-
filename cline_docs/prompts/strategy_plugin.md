@@ -67,6 +67,7 @@
 4.  **Populate Document Using Template:**
     *   Use the appropriate template from `cline_docs/templates/`.
     *   Fill in all sections of the template.
+    *   Define clear objectives, key steps, dependencies, and expected        outputs for the document, ensuring alignment with project goals.
 
 5.  **Manual Dependency Linking (CRITICAL):**
     *   **Domain Module:**  Add a link to the new Module in the `system_manifest.md` "Component Registry" section.
@@ -78,27 +79,45 @@
 
 ---
 
-## IV. Prioritizing Tasks and Subtasks
+## IV. Task Decomposition and Prioritization
 
-**Action**: Determine task/subtask priority and order.
-**Procedure:**
-1. **Review Existing Tasks**: Check incomplete instruction files in module or task directories.
-2. **Assess Dependencies**: Use `module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers along with any other dependency information to prioritize prerequisite tasks and Domain Components.
-3. **Consider Project Goals**: Align with `system_manifest.md` objectives, prioritizing key contributions.
-4. **Review `activeContext.md`**: Factor in recent priorities, issues, or feedback.
-5. **Update `activeContext.md`**: Record priorities and reasoning.
+**Action**: Break down complex tasks into manageable subtasks, prioritize them, and plan their implementation.
 
-### IV.1 Prioritization Flowchart
+**Procedure**:
+1. **Recursive Decomposition**:
+   - Break large tasks into smaller, well-defined subtasks. Continue decomposing until subtasks are actionable and specific.
+   - Organize subtasks hierarchically (e.g., Feature → Sub-feature → Task).
+2. **Define Objectives**:
+   - For each task/subtask, state its objective clearly, aligning with `system_manifest.md` goals.
+3. **Outline Steps**:
+   - List key steps required to complete each task/subtask, ensuring clarity and feasibility.
+4. **Assess Dependencies**:
+   - Use `module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers to identify prerequisite tasks or modules.
+   - Note dependencies that must be resolved first.
+5. **Consider Alternatives**:
+   - Explore different approaches or design patterns, discussing trade-offs where relevant.
+6. **Define Expected Output**:
+   - Describe the successful outcome of each task (e.g., files created, functionality implemented).
+7. **Prioritize Tasks**:
+   - Review existing tasks in module or task directories.
+   - Prioritize based on dependencies, project goals, and recent priorities in `activeContext.md`.
+   - Record prioritization reasoning in `activeContext.md`.
+8. **Present Plan**:
+   - Share the task breakdown and prioritization with the user for feedback before proceeding.
+
+### IV.1 Task Planning Flowchart
 ```mermaid
 flowchart TD
-A[Start] --> B[Review Existing Tasks]
-B --> C[Assess Dependencies]
-C --> D[Align with Project Goals]
-D --> E[Check activeContext.md]
-E --> F[Set Priorities]
-F --> G[Update activeContext.md]
-G --> H[End]
-```
+A[Start] --> B[Decompose Task Recursively]
+B --> C[Define Objectives]
+C --> D[Outline Steps]
+D --> E[Assess Dependencies]
+E --> F[Consider Alternatives]
+F --> G[Define Expected Output]
+G --> H[Prioritize Tasks]
+H --> I[Update activeContext.md]
+I --> J[Present Plan]
+J --> K[End]
 
 ---
 
