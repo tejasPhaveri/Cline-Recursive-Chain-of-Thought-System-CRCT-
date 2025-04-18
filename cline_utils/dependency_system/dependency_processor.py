@@ -162,6 +162,8 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
             return 1
 
         grid_changed = False # Track if any change was made
+        reciprocal_changes = [] # List to store reciprocal change descriptions
+
         for target_key in args.target_key: # Iterate through each target key
             try:
                 # Add dependency from source to current target
@@ -175,11 +177,17 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
                 if args.dep_type == '>':
                     reciprocal_char = '<'
                     new_grid = add_dependency_to_grid(tracker_data["grid"], target_key, args.source_key, keys, reciprocal_char)
-                    if new_grid != tracker_data["grid"]: tracker_data["grid"] = new_grid; grid_changed = True
+                    if new_grid != tracker_data["grid"]:
+                        tracker_data["grid"] = new_grid
+                        grid_changed = True
+                        reciprocal_changes.append(f"{target_key} -> {args.source_key} ({reciprocal_char})")
                 elif args.dep_type == '<':
                     reciprocal_char = '>'
                     new_grid = add_dependency_to_grid(tracker_data["grid"], target_key, args.source_key, keys, reciprocal_char)
-                    if new_grid != tracker_data["grid"]: tracker_data["grid"] = new_grid; grid_changed = True
+                    if new_grid != tracker_data["grid"]:
+                        tracker_data["grid"] = new_grid
+                        grid_changed = True
+                        reciprocal_changes.append(f"{target_key} -> {args.source_key} ({reciprocal_char})")
 
             except ValueError as ve:
                 # Catch errors from add_dependency_to_grid (e.g., invalid keys within the function)
@@ -192,7 +200,12 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
 
         # Update last edit message for batch operation
         target_keys_str = ', '.join(args.target_key)
-        tracker_data["last_grid_edit"] = f"Batch add dependency {args.source_key} -> [{target_keys_str}] ({args.dep_type})"
+        last_edit_message = f"Batch add dependency {args.source_key} -> [{target_keys_str}] ({args.dep_type})"
+
+        if reciprocal_changes:
+            last_edit_message += " and reciprocal: " + ", ".join(reciprocal_changes)
+
+        tracker_data["last_grid_edit"] = last_edit_message
 
         success = write_tracker_file(args.tracker, tracker_data["keys"], tracker_data["grid"], tracker_data.get("last_key_edit", ""), tracker_data["last_grid_edit"])
         if success: print(f"Added dependencies from {args.source_key} -> {target_keys_str} ({args.dep_type}) in {args.tracker}"); return 0
