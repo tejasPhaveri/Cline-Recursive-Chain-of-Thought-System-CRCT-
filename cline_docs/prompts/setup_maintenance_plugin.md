@@ -77,19 +77,22 @@
     *   **IMPORTANT**: Use `show-keys` or `show-dependencies` commands to inspect tracker content. **Avoid** using `read_file` on tracker files directly to save context and ensure correct parsing.
     *   For each relationship marked with 'p', 's', or 'S':
         *   Use `show-dependencies --key <key>` to understand the full context (dependencies) of related files.
+            *   The key used with `show-dependencies` is the *row*, the dependencies returned are the *column*.
         *   *(If you only need to see the key definitions for a specific tracker, use `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker <path>` for efficiency.)*
         *   If dependency context isn't clear from `show-dependencies`, examine the source code or documentation of the *related files* themselves using `read_file` (e.g., `read_file <path_from_show_dependencies_output>`).
+        *   **Note:** If `show-dependencies` lists keys that are not present in the tracker you are currently inspecting (e.g., code file keys in `doc_tracker.md`), these dependencies belong in a different tracker (like `module_relationship_tracker.md` or mini-trackers) and should be addressed there. Do not attempt to set these dependencies in the current tracker.
         *   Determine the correct dependency relationship (or confirm 'n' - no dependency). Record the verification of s/S for that key in .clinerules [LEARNING_JOURNAL]. Refer to **IV.1 Dependency Characters**.
+        *   When determing the dependency relation between files, determine if one or both **functionally relies** on the other, or if one document provides information that would be **helpful when writing code related to the other document's content**. If neither is the case, assign 'n' (no dependency).
 
 3.  **Correct/Confirm Dependencies**:
     *   If a 'p', 's', or 'S' needs to be changed to a specific relationship ('<', '>', 'x', 'd', 'n'):
         *   Use `add-dependency` to set the correct character.
         ```bash
         # Example: Set dependency between 2Aa and 3Aad in main tracker
-        python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aad --dep-type ">"
+        `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aad --dep-type ">"`
         
         # Example: Set NO dependency ('n') between 2Aa and 3Aad
-        python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aad --dep-type "n"
+        `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aad --dep-type "n"`
         ```
     *   If a suggested relationship ('<', '>', 'x', 'd') seems incorrect, use `add-dependency` to set the correct character (e.g., 'n' if there's no dependency, or '<' if the direction is wrong).
 
@@ -114,8 +117,6 @@
 ### IV.4 Dependency Processor Commands
 
 *(Refer to the Core System Prompt, Section VIII, for a more comprehensive list and detailed description of common `dependency_processor.py` commands.)*
-
-
 
 **Key commands for configuration and setup in this phase include:**
 
