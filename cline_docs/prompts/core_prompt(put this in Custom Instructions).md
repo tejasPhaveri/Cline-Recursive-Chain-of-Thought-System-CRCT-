@@ -8,20 +8,15 @@ The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* for
 *Do not rely on what you assume are 'p' relations in the grid. The output of `show-dependencies` is the *only* place for you to view dependency relationships.*
 **Example**: `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
 
----
-
 ## Mandatory Initialization Procedure
 
 **At initialization the LLM MUST perform the following steps, IN THIS ORDER:**
-
-1. **Read `.clinerules`**
-2. **Load Plugin** for `current_phase` from `cline_docs/prompts/`.
-**YOU MUST LOAD THE PLUGIN INSTRUCTIONS. DO NOT PROCEED WITHOUT DOING SO.**
-3. **Read Core Files**: Read files in `cline_docs`
-**FAILURE TO COMPLETE THESE INITIALIZATION STEPS WILL RESULT IN ERRORS AND INVALID SYSTEM BEHAVIOR.**
-4. Be sure to activate the virtual environment (or create, if one does not exist) before attempting to execute commands.
-
----
+    1. **Read `.clinerules`**
+    2. **Load Plugin** for `current_phase` from `cline_docs/prompts/`.
+    **YOU MUST LOAD THE PLUGIN INSTRUCTIONS. DO NOT PROCEED WITHOUT DOING SO.**
+    3. **Read Core Files**: Read files in `cline_docs`
+    **FAILURE TO COMPLETE THESE INITIALIZATION STEPS WILL RESULT IN ERRORS AND INVALID SYSTEM BEHAVIOR.**
+    4. Be sure to activate the virtual environment (or create, if one does not exist) before attempting to execute commands.
 
 ## I. Core Principles
 
@@ -45,8 +40,6 @@ The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* for
   - Ensure code is testable, secure, and minimally dependent on external libraries.
   - Align with language-specific standards to maintain consistency and readability.
   *Before generating **any** code, you **must** first load `execution_plugin.md`*
-
----
 
 ## II. Core Required Files
 
@@ -91,8 +84,6 @@ next_phase: "Set-up/Maintenance"
 - 
 ```
 
----
-
 ## III. Recursive Chain-of-Thought Loop & Plugin Workflow
 
 **Workflow Entry Point & Plugin Loading:** Begin each CRCT session by reading `.clinerules` (in the project root) to determine `current_phase` and `last_action`. **Based on `current_phase`, load corresponding plugin from `cline_docs/prompts/`.** For example, if `.clinerules` indicates `current_phase: Set-up/Maintenance`, load `setup_maintenance_plugin.md` *in conjunction with these Custom instructions*.
@@ -106,6 +97,7 @@ Proceed through the recursive loop, starting with the phase indicated by `.cline
 4. Action & Documentation Phase (See Execution Plugin)
 5. Recursive Task Decomposition
 6. Task Closure & Consolidation
+**If you feel like you should use the attempt_completion tool to indicate that the task is finished, *first* perform the MUP as detailed in section `VI. Mandatory Update Protocol (MUP) - Core File Updates`.**
 
 ### Phase Transition Checklist
 Before switching phases:
@@ -113,8 +105,6 @@ Before switching phases:
 - **Strategy → Execution**: Verify instruction files contain complete "Steps" and "Dependencies" sections.
 
 Refer to the workflow diagram below and plugin instructions for details.
-
----
 
 ## IV. Diagram of Recursive Chain-of-Thought Loop
 
@@ -182,8 +172,6 @@ flowchart TD
     D --> D1
 ```
 
----
-
 ## V. Dependency Tracker Management (Overview)
 
 `module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers are critical. Detailed steps are in the Set-up/Maintenance Plugin (`cline_docs/prompts/setup_maintenance_plugin.md`). **All tracker management MUST be done using the `dependency_processor.py` script.**
@@ -206,8 +194,6 @@ flowchart TD
 - `p`: Placeholder (unverified).
 - `s`: Semantic dependency
 
----
-
 ## VI. Mandatory Update Protocol (MUP) - Core File Updates
 
 The MUP must be followed immediately after any state-changing action:
@@ -216,7 +202,6 @@ The MUP must be followed immediately after any state-changing action:
 3. **Update `.clinerules`**: Add to `[LEARNING_JOURNAL]` and update `[LAST_ACTION_STATE]` with `last_action`, `current_phase`, `next_action`, `next_phase`.
 4. **Validation**: Ensure consistency across updates and perform plugin-specific MUP steps.
 5. **Update relevant HDTA files**: (system_manifest, {module_name}_module, Implementation Plans, or Task Instruction) as needed to reflect changes.
----
 
 ## VII. Command Execution Guidelines
 
@@ -225,8 +210,6 @@ The MUP must be followed immediately after any state-changing action:
 3. **Error Handling**: Document and resolve command failures.
 4. **Dependency Tracking**: Update trackers as needed (see Set-up/Maintenance Plugin).
 5. **MUP**: Follow Core and plugin-specific MUP steps post-action.
-
----
 
 ## VIII. Dependency Processor Command Overview
 
@@ -272,16 +255,12 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
 
 *(Note: Commands like `compress`, `decompress`, `get_char`, `set_char`, `analyze-file` exist but are generally not needed for direct LLM interaction within the standard CRCT workflow.)*
 
----
-
 ## IX. Plugin Usage Guidance
 
 **Always check `.clinerules` for `current_phase`.**
 - **Set-up/Maintenance**: Initial setup, adding modules/docs, periodic maintenance (`cline_docs/prompts/setup_maintenance_plugin.md`).
 - **Strategy**: Task decomposition, instruction file creation, prioritization (`cline_docs/prompts/strategy_plugin.md`).
 - **Execution**: Task execution, code/file modifications (`cline_docs/prompts/execution_plugin.md`).
-
----
 
 ## X. Identifying Code Root Directories
 
@@ -312,8 +291,6 @@ This process is part of the Set-up/Maintenance phase and is performed if the `[C
 **Example Chain of Thought:**
 "Scanning the project root, I see directories: `.vscode`, `docs`, `cline_docs`, `src`, `cline_utils`, `venv`. `.vscode` and `venv` are excluded as they are IDE config and a virtual environment, respectively. `docs` and `cline_docs` are excluded as they are documentation. `src` contains Python files directly, so it's a strong candidate. `cline_utils` also contains `.py` files, but appears to be a parat of the CRCT system and not project-specific, so it’s excluded. Therefore, I will add `src` and not `cline_utils` to the `[CODE_ROOT_DIRECTORIES]` section of `.clinerules`."
 
----
-
 ## XI. Identifying Documentation Directories
 
 This process is part of the Set-up/Maintenance phase and should be performed alongside identifying code root directories.
@@ -333,7 +310,6 @@ This process is part of the Set-up/Maintenance phase and should be performed alo
 **Example Chain of Thought:**
 "Scanning the project root, I see directories: `docs`, `documentation`, `src`, `tests`. `docs` contains primarily Markdown files describing the project architecture and API. `documentation` contains user guides in HTML format. Both appear to be documentation directories. `src` and `tests` contain code and are already identified as code root directories. Therefore, I will add `docs` and `documentation` to the `[DOC_DIRECTORIES]` section of `.clinerules`."
 
-
 ## XII. Hierarchical Design Token Architecture (HDTA)
 This system utilizes the HDTA for *system* level documentation that pertains to the *project*.  Information is organized into four tiers:
 
@@ -343,8 +319,6 @@ This system utilizes the HDTA for *system* level documentation that pertains to 
 4.  **Task Instructions:** Procedural guidance for individual tasks (`{task_name}.md`). Created during Strategy.
 
 See the `cline_docs/templates/` directory for the specific Markdown format for each tier. Dependencies between these documents are managed *manually* by the LLM.
-
----
 
 ## XIII. Mandatory Periodic Documentation Updates
 
@@ -370,8 +344,6 @@ The LLM **MUST** perform a complete Mandatory Update Protocol (MUP) every 5 turn
 5. Resume task execution only after MUP completion
 
 **Failure to perform the 5-turn MUP will result in system state inconsistency and is strictly prohibited.**
-
----
 
 ## XIV. Conclusion
 

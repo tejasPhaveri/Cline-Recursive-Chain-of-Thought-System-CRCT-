@@ -2,8 +2,6 @@
 
 **This Plugin provides detailed instructions and procedures for the Set-up/Maintenance phase of the CRCT system. It should be used in conjunction with the Core System Prompt.**
 
----
-
 ## I. Entering and Exiting Set-up/Maintenance Phase
 
 **Entering Set-up/Maintenance Phase:**
@@ -27,8 +25,6 @@
    next_phase: "Strategy"
    ```
 3. **User Action**: After updating `.clinerules`, pause for user to trigger the next session (e.g., reset context in VS Code). See Core System Prompt, Section III for a phase transition checklist.
-
----
 
 ## II. Initializing Core Required Files
 
@@ -57,8 +53,6 @@
      ```
 3. **MUP**: Follow Core Prompt MUP after creating files.
 
----
-
 ## III. Analyzing and Verifying Tracker Dependencies
 
 **Objective**: Ensure trackers accurately reflect project dependencies, removing 'p' placeholders. **All tracker modifications MUST use `dependency_processor.py` commands.**
@@ -74,18 +68,19 @@
     *   **Review logs (`debug.txt`, `suggestions.log`)** for analysis details and suggested changes.
 
 2.  **Review and Verify Placeholders ('p') and Suggestions ('s', 'S')**:
-    *   **IMPORTANT**: Use `show-keys` or `show-dependencies` commands to inspect tracker content. **Avoid** using `read_file` on tracker files directly to save context and ensure correct parsing.
+    *   **IMPORTANT**: Use `show-keys` or `show-dependencies` commands to inspect tracker content. **Avoid** using `read_file` on *tracker* files directly to save context and ensure correct parsing.
+    **All files must be explicitly verified by reading.**
     *   For each relationship marked with 'p', 's', or 'S':
         *   Use `show-dependencies --key <key>` to understand the full context (dependencies) of related files.
         *   **IMPORTANT**:    
             *   **The key used with `show-dependencies` is the *row*, the dependencies returned are the *column*.**
             *   When reviewing the output the keys listed are the *column* keys that have a dependency with the *row* key you provided to the `show-dependencies` command.
         *   *(If you only need to see the key definitions for a specific tracker, use `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker <path>` for efficiency.)*
-        *   If dependency context isn't clear from `show-dependencies`, examine the source code or documentation of the *related files* themselves using `read_file` (e.g., `read_file <path_from_show_dependencies_output>`).
+        *   Examine the source code or documentation of the *related files* from `show-dependencies` themselves using `read_file` (e.g., `read_file <path_from_show_dependencies_output>`).
         *   **Note:** If `show-dependencies` lists keys that are not present in the tracker you are currently inspecting (e.g., code file keys in `doc_tracker.md`), these dependencies belong in a different tracker (like `module_relationship_tracker.md` or mini-trackers) and should be addressed there. Do not attempt to set these dependencies in the current tracker.
         *   Determine the correct dependency relationship (or confirm 'n' - no dependency). Record the verification of s/S for that key in .clinerules [LEARNING_JOURNAL]. Refer to **IV.1 Dependency Characters**.
-        *   When determing the dependency relation between files, determine if one or both **functionally relies** on the other, or if one document provides information that would be **helpful when writing code related to the other document's content**. If neither is the case, assign 'n' (no dependency).
-
+        *   When determing the dependency relation between files, determine if one or both **functionally relies** on the other, or if one document provides information that another *relies* on when writing code related to the other document's content**. If neither is the case, assign 'n' (no dependency).
+        *one document must directly rely on the information in the other for its own content or implementation detail*
 3.  **Correct/Confirm Dependencies**:
     *   If a 'p', 's', or 'S' needs to be changed to a specific relationship ('<', '>', 'x', 'd', 'n'):
         *   Use `add-dependency` to set the correct character. This command can now accept multiple target keys.
@@ -99,11 +94,9 @@
         *(Note: --target-key accepts multiple keys. The specified `--dep-type` is applied to *all* targets.)*
         *(Recommendation: Specify no more than five target keys at once for clarity.)*
     *   If a suggested relationship ('<', '>', 'x', 'd') seems incorrect, use `add-dependency` to set the correct character (e.g., 'n' if there's no dependency, or '<' if the direction is wrong).
-4.  **Iterate and Complete**: Repeat steps 2 and 3 until no 'p' placeholders remain in the primary trackers (`module_relationship_tracker.md`, `doc_tracker.md`). Prioritize clearing these before moving to Strategy phase. Mini-tracker verification can continue iteratively.
+4.  **Iterate and Complete**: Repeat steps 2 and 3 until no 'p' placeholders remain in all trackers. Prioritize clearing these before moving to Strategy phase.
 
 5.  **MUP**: Apply Core MUP and Section VII additions after each verification/correction session and upon completion of primary tracker verification.
-
----
 
 ## IV. Dependency Tracker Management (Details)
 *(Dependency character definitions are in the Core System Prompt, Section V)*
@@ -158,24 +151,19 @@ flowchart TD
     end
 ```
 
----
-
 ## V. Populating Mini-Trackers
 
-**Objective**: Create and populate mini-trackers in `{module_dir}/{module_dir}_main_instructions.txt`.
+**Objective**: Populate mini-trackers in `*_module.md` files located in the code directories.
 
 **Procedure:**
 1. **Identify Modules**: Use `module_relationship_tracker.md` directories.
 2. **Instruction File Check:**
-   - If `{module_dir}/{module_dir}_main_instructions.txt` is missing:
-     - Create with basic structure (see Core Prompt, Section VII).
-     - Initialize mini-tracker:       
+   - If `*_module.md` is missing:
+     - Run `dependency_processor` with the analyze-project command.      
    - If it exists, proceed to Step 3.
 3. **Suggest and Validate**: See **Section IV.5** for example commands. Adapt `--tracker` and keys accordingly.
 5. **Iterate and Complete**: Repeat until populated.
 6. **MUP**: Apply Core MUP and Section VI additions.
-
----
 
 ## VI. Set-up/Maintenance Plugin - MUP Additions
 

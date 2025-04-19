@@ -176,18 +176,31 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
                 reciprocal_char = None
                 if args.dep_type == '>':
                     reciprocal_char = '<'
-                    new_grid = add_dependency_to_grid(tracker_data["grid"], target_key, args.source_key, keys, reciprocal_char)
-                    if new_grid != tracker_data["grid"]:
-                        tracker_data["grid"] = new_grid
-                        grid_changed = True
-                        reciprocal_changes.append(f"{target_key} -> {args.source_key} ({reciprocal_char})")
                 elif args.dep_type == '<':
                     reciprocal_char = '>'
-                    new_grid = add_dependency_to_grid(tracker_data["grid"], target_key, args.source_key, keys, reciprocal_char)
-                    if new_grid != tracker_data["grid"]:
-                        tracker_data["grid"] = new_grid
-                        grid_changed = True
-                        reciprocal_changes.append(f"{target_key} -> {args.source_key} ({reciprocal_char})")
+
+                if reciprocal_char:
+                    source_key_index = keys.index(args.source_key)
+                    existing_dep_char = get_char_at(tracker_data["grid"].get(target_key, ""), source_key_index)
+
+                    upgrade_to_mutual = False
+                    if reciprocal_char == '<' and existing_dep_char == '>':
+                        upgrade_to_mutual = True
+                    elif reciprocal_char == '>' and existing_dep_char == '<':
+                        upgrade_to_mutual = True
+
+                    if upgrade_to_mutual:
+                        new_grid = add_dependency_to_grid(tracker_data["grid"], target_key, args.source_key, keys, 'x')
+                        if new_grid != tracker_data["grid"]:
+                            tracker_data["grid"] = new_grid
+                            grid_changed = True
+                            reciprocal_changes.append(f"{target_key} -> {args.source_key} (upgraded to 'x' due to conflict)")
+                    else:
+                        new_grid = add_dependency_to_grid(tracker_data["grid"], target_key, args.source_key, keys, reciprocal_char)
+                        if new_grid != tracker_data["grid"]:
+                            tracker_data["grid"] = new_grid
+                            grid_changed = True
+                            reciprocal_changes.append(f"{target_key} -> {args.source_key} ({reciprocal_char})")
 
             except ValueError as ve:
                 # Catch errors from add_dependency_to_grid (e.g., invalid keys within the function)
