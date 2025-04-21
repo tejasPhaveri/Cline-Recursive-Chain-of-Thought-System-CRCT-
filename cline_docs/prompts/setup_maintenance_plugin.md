@@ -96,13 +96,13 @@
             *   **Purpose of Dependencies**: Remember, these verified dependencies guide the **Strategy phase** (determining task order) and the **Execution phase** (loading minimal necessary context). A dependency should mean "You *need* to consider/load the related file to work effectively on this one."
             *   **Assign 'n' if No True Dependency**: If the relationship is merely thematic, uses similar terms, or is indirect, assign 'n' (verified no dependency). **It is better to mark 'n' than to create a weak dependency.**
             *   **State Reasoning (MANDATORY)**: Before proceeding to the next step (`add-dependency`), you **MUST** clearly state your reasoning for the chosen dependency character (`<`, `>`, `x`, `d`, or `n`) for each specific relationship you intend to set, based on your analysis of the source files and the functional reliance criteria outlined above.
-        *   **Correct/Confirm Dependencies with `add-dependency`**: After stating your reasoning, use the `add-dependency` command, targeting the *current tracker file* you are verifying. Set the correct dependency character between the row key (`--source-key <key_string>`) and the specific column key(s) (`--target-key <column_key_1> [<column_key_2>...]`) you just verified. You can update multiple target relationships for the *same source key* in one command if they share the same new dependency type.
+        *   **Correct/Confirm Dependencies with `add-dependency`**: After stating your reasoning, use the `add-dependency` command, targeting the *current tracker file* you are verifying. **Crucially, the `<key_string>` (the key you initially ran `show-dependencies` on) is ALWAYS the `--source-key` for this `add-dependency` operation.** The keys identified from the `show-dependencies` output (the column keys whose relationship you are verifying) become the `--target-key` values. Set the correct dependency character between the row key (`--source-key <key_string>`) and the specific column key(s) (`--target-key <column_key_1> [<column_key_2>...]`) you just verified. You can update multiple target relationships for the *same source key* in one command if they share the same new dependency type.
           ```bash
-          # Example: Set '>' from 1A2 to 2B1 in doc_tracker.md
+          # Example: Set '>' from 1A2 (source) to 2B1 (target) in doc_tracker.md
           # Reasoning: File associated with 1A2 (docs/setup.md) details setup steps required BEFORE using the API described in 2B1 (docs/api/users.md). Thus, 2B1 depends on 1A2.
           python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/doc_tracker.md --source-key 1A2 --target-key 2B1 --dep-type ">"
 
-          # Example: Set 'n' from 1A2 to 3C1 and 3C2 in doc_tracker.md
+          # Example: Set 'n' from 1A2 (source) to 3C1 and 3C2 (targets) in doc_tracker.md
           # Reasoning: Files 3C1 and 3C2 are unrelated examples and have no functional dependency on the setup guide 1A2.
           python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/doc_tracker.md --source-key 1A2 --target-key 3C1 3C2 --dep-type "n"
           ```

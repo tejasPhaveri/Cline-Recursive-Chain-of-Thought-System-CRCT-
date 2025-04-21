@@ -239,11 +239,11 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
 2.  **`show-dependencies --key <key>`**:
     *   **Purpose**: Displays all known outgoing and incoming dependencies (with paths) for a specific `<key>` by searching across *all* tracker files (main, doc, mini). Essential for understanding context before modifying a file.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
-        *   **IMPORTANT**:    
-            *   **The key used with `show-dependencies` is the *row*. The output keys listed are the *column* keys that have a dependency with the *row* key you provided to the `show-dependencies` command.
+        *   **IMPORTANT**: The key used with `show-dependencies` is the *row*. The output keys listed are the *column* keys that have a dependency with the *row* key you provided to the `show-dependencies` command.
             
 3.  **`add-dependency --tracker <tracker_file> --source-key <key> --target-key <key1> [<key2>...] --dep-type <char>`**:
-    *   **Purpose**: Manually sets the specified dependency relationship (`--dep-type`) between one source key and one or more target keys *within the specified `<tracker_file>`*. Use this to correct suggestions or explicitly mark verified relationships (including 'n').
+    *   **Purpose**: Manually sets the specified dependency relationship (`--dep-type`) between one **source key** (`--source-key`) and one or more **target keys** (`--target-key`) *within the specified `<tracker_file>`*. Use this to correct suggestions or explicitly mark verified relationships (including 'n').
+    *   **Workflow Note**: During the verification process described in the Set-up/Maintenance plugin, the key initially provided to `show-dependencies` **always serves as the `--source-key`** for this command. The related column keys identified from the `show-dependencies` output are used as the `--target-key`(s).
     *   **IMPORTANT**: Before executing this command during the verification process (Set-up/Maintenance), you **MUST** state your reasoning for choosing the specific `--dep-type` based on your analysis of functional reliance between the source and target files/concepts.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd 1Be --dep-type ">"`
     *   *(Note: This command applies the *single* `--dep-type` to *all* specified target keys relative to the source key.)*
