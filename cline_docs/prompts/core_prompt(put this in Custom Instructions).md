@@ -244,6 +244,7 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
             
 3.  **`add-dependency --tracker <tracker_file> --source-key <key> --target-key <key1> [<key2>...] --dep-type <char>`**:
     *   **Purpose**: Manually sets the specified dependency relationship (`--dep-type`) between one source key and one or more target keys *within the specified `<tracker_file>`*. Use this to correct suggestions or explicitly mark verified relationships (including 'n').
+    *   **IMPORTANT**: Before executing this command during the verification process (Set-up/Maintenance), you **MUST** state your reasoning for choosing the specific `--dep-type` based on your analysis of functional reliance between the source and target files/concepts.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd 1Be --dep-type ">"`
     *   *(Note: This command applies the *single* `--dep-type` to *all* specified target keys relative to the source key.)*
     *   *(Recommendation: Specify no more than five target keys at once for clarity.)*
