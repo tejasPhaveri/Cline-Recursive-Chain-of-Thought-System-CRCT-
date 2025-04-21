@@ -1,9 +1,9 @@
-# Cline Recursive Chain-of-Thought System (CRCT) - v7.5
+# Cline Recursive Chain-of-Thought System (CRCT) - v7.6
 
 Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework designed to manage context, dependencies, and tasks in large-scale Cline projects within VS Code. Built for the Cline extension, CRCT leverages a recursive, file-based approach with a modular dependency tracking system to maintain project state and efficiency as complexity increases.
 
 Version **v7.5** represents a significant restructuring of the CRCT system, bringing it into alignment with its original design goals.  With the core architecture now established, future v7.x releases will focus on performance optimizations, enhancements, and refining the existing codebase.
-
+- Version **v7.6** fixes various bugs and inconsistancies, enhances logic in the dependency_system files, and refines the operational instructions in the prompts.
 This version includes a more automated design, consolidating operations and enhancing efficiency.
 It also incorporates:
 - base templates for all core files
@@ -32,18 +32,19 @@ Cache + batch processing enable *significant* time savings.
 
 - **Recursive Decomposition**: Breaks tasks into manageable subtasks, organized via directories and files for isolated context management.
 - **Minimal Context Loading**: Loads only essential data, expanding via dependency trackers as needed.
-- **Persistent State**: Uses the VS Code file system to store context, instructions, outputs, and dependencies—kept up-to-date via a **Mandatory Update Protocol (MUP)**.
+- **Persistent State**: Uses the VS Code file system to store context, instructions, outputs, and dependencies. State integrity is rigorously maintained via a **Mandatory Update Protocol (MUP)** applied after actions and periodically during operation.
 - **Modular Dependency System**: Fully modularized dependency tracking system.
 - **Contextual Keys**: Introduces `KeyInfo` for context-rich keys, enabling more accurate and hierarchical dependency tracking.
 - **Hierarchical Dependency Aggregation**: Implements hierarchical rollup and foreign dependency aggregation for the main tracker, providing a more comprehensive view of project dependencies.
-- **New `show-dependencies`command**: The LLM no longer has to manually read and decipher tracker files. This arg will automatically read all trackers for the provided key and return both inbound and outbound dependencies with a full path to each related file. (The LLM still needs to manually replace any placeholder characters 'p', but can now do so with the `add-dependency` command, greatly simplifying the process.)
+- **Enhanced Dependency Workflow**: A refined workflow simplifies dependency management. The `show-keys` command identifies keys needing attention within a tracker, while the powerful `show-dependencies` command aggregates dependency details (inbound/outbound, paths) from *all* trackers for a specific key, eliminating manual tracker deciphering. Placeholder ('p') relationships identified via this process are resolved using the `add-dependency` command.
 - **Configurable Embedding Device**: Allows users to configure the embedding device (`cpu`, `cuda`, `mps`) via `.clinerules.config.json` for optimized performance on different hardware. (Note: *the system does not yet install the requirements for cuda or mps automatically, please install the requirements manually or with the help of the LLM.*)
 - **File Exclusion Patterns**: Users can now define file exclusion patterns in `.clinerules.config.json` to customize project analysis.
 - **New Cache System**: Implemented a new caching mechanism for improved performance, including improved invalidation logic.
 - **New Batch Processing System**: Introduced a batch processing system for handling large tasks efficiently, with enhanced flexibility in passing arguments to processor functions.
 - **Modular Dependency Tracking**:
-  - Mini-trackers (file/function-level within modules)
-  - Uses hierarchical keys and RLE compression for efficiency.
+  - Utilizes main trackers (`module_relationship_tracker.md`, `doc_tracker.md`) and module-specific mini-trackers (`{module_name}_module.md`).
+  - Mini-tracker files also serve as the HDTA Domain Module documentation for their respective modules.
+  - Employs hierarchical keys and RLE compression for efficiency.
 - **Automated Operations**: System operations are now largely automated and condensed into single commands, streamlining workflows and reducing manual command execution.
 - **Phase-Based Workflow**: Operates in distinct phases—**Set-up/Maintenance**, **Strategy**, **Execution**—controlled by `.clinerules`.
 - **Chain-of-Thought Reasoning**: Ensures transparency with step-by-step reasoning and reflection.
