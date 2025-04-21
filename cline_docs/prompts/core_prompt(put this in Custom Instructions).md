@@ -43,22 +43,33 @@ The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* for
 
 ## II. Core Required Files
 
-These files form the project foundation. *Must be loaded at initialization.* If a file is missing, handle its creation as follows:
+These files form the project foundation. ***At initialization, you MUST read the following specific files:***
+- `.clinerules`
+- `system_manifest.md` (if it exists)
+- `activeContext.md` (if it exists)
+- `changelog.md` (if it exists)
+- `userProfile.md` (if it exists)
+- `progress.md` (if it exists)
+
+**IMPORTANT: Do NOT attempt to read the content of tracker files (`module_relationship_tracker.md`, `doc_tracker.md`) directly.** Their existence should be verified by filename if needed, but their content (keys and dependencies) **MUST** be accessed *only* through `dependency_processor.py` commands, primarily `show-keys` and `show-dependencies`. This conserves context tokens and ensures correct parsing.
+
+If a required file (from the list above) is missing, handle its creation as follows:
 
 | File                  | Purpose                                                    | Location       | Creation Method if Missing                                                                                                                    |
 |-----------------------|------------------------------------------------------------|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| `.clinerules`         | Tracks phase, last action, project intelligence, and code root directories | Project root   | Create manually with minimal content (see example below)                                                                                      |
+| `.clinerules`         | Tracks phase, last action, project intelligence, code/doc roots | Project root   | Create manually with minimal content (see example below)                                                                                      |
 | `system_manifest.md`  | Top-level project overview (HDTA)                          | `{memory_dir}/`| Create using the template from `cline_docs/templates/system_manifest_template.md`                                                           |
 | `activeContext.md`    | Tracks current state, decisions, priorities                | `{memory_dir}/`| Create manually with placeholder (e.g., `# Active Context`)                                                                                   |
-| `module_relationship_tracker.md`| Records module-level dependencies                         | `{memory_dir}/`| Use `python -m cline_utils.dependency_system.dependency_processor analyze-project` |
+| `module_relationship_tracker.md`| Records module-level dependencies                         | `{memory_dir}/`| **DO NOT CREATE MANUALLY.** Use `python -m cline_utils.dependency_system.dependency_processor analyze-project` |
 | `changelog.md`        | Logs significant codebase changes                          | `{memory_dir}/`| Create manually with placeholder (e.g., `# Changelog`)                                                                                        |
-| `doc_tracker.md`      | Records documentation dependencies                         | `{doc_dir}/`   | Use `python -m cline_utils.dependency_system.dependency_processor analyze-project` |
+| `doc_tracker.md`      | Records documentation dependencies                         | `{doc_dir}/`   | **DO NOT CREATE MANUALLY.** Use `python -m cline_utils.dependency_system.dependency_processor analyze-project` |
+| `userProfile.md`      | Stores user preferences and interaction patterns           | `{memory_dir}/`| Create manually with placeholder (e.g., `# User Profile`)                                                                                 |
+| `progress.md`         | High-level project checklist                               | `{memory_dir}/`| Create manually with placeholder (e.g., `# Project Progress`)                                                                             |
 
 *Notes*:
-- `userProfile.md` is considered a core required file and should be read at initialization of any new task and updated as a part of MUP.
 - `{memory_dir}` (e.g., `cline_docs/`) is for operational memory; `{doc_dir}` (e.g., `docs/`) is for project documentation. A "module" is a top-level directory within the project code root(s).
-- **For tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers), do *not* create or modify manually. Always use the `dependency_processor.py` script as specified to ensure correct format and data consistency.**
-- For other files, create manually with minimal content if needed (e.g., a title or basic structure).
+- **For tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers), do *not* create or modify manually. Always use the `dependency_processor.py analyze-project` command as specified to ensure correct format and data consistency.**
+- **Note: `{module_name}_module.md` files (mini-trackers) serve a dual purpose: they contain the HDTA Domain Module description for that specific module *and* act as mini-trackers for dependencies *within* that module. Dependencies are managed via `dependency_processor.py` commands, while the descriptive content is managed manually.**
 - Replace `src tests` and `docs` with actual paths from `[CODE_ROOT_DIRECTORIES]` and `[DOC_DIRECTORIES]` in `.clinerules`.
 - `progress.md` contains a high-level project checklist, this will help us track the broader progress of the project.
 **`.clinerules` File Format (Example):**
@@ -174,7 +185,7 @@ flowchart TD
 
 ## V. Dependency Tracker Management (Overview)
 
-`module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers are critical. Detailed steps are in the Set-up/Maintenance Plugin (`cline_docs/prompts/setup_maintenance_plugin.md`). **All tracker management MUST be done using the `dependency_processor.py` script.**
+`module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers are critical for mapping the project's structure and interconnections. Detailed management steps are in the Set-up/Maintenance Plugin (`cline_docs/prompts/setup_maintenance_plugin.md`). **All tracker management MUST be done using the `dependency_processor.py` script.** Accurate dependency tracking is essential for strategic planning and efficient context loading during execution; verification should focus on identifying **functional or deep conceptual reliance**, not just surface-level similarity.
 
 **Tracker Overview Table:**
 
@@ -185,14 +196,14 @@ flowchart TD
 | Mini-Trackers         | Within-module file/function/doc dependencies | File/function/doc-level | `{module_name}_module.md` | Low                     |
 
 **Dependency Characters:**
-- `<`: Row depends on column.
-- `>`: Column depends on row.
-- `x`: Mutual dependency.
-- `d`: Documentation dependency.
-- `o`: Self dependency (diagonal only).
-- `n`: Verified no dependency.
-- `p`: Placeholder (unverified).
-- `s`: Semantic dependency
+- `<`: Row **functionally relies on** or requires Column for context/operation.
+- `>`: Column **functionally relies on** or requires Row for context/operation.
+- `x`: Mutual functional reliance or deep conceptual link.
+- `d`: Row is documentation **essential for understanding/using** Column, or vice-versa.
+- `o`: Self dependency (diagonal only - managed automatically).
+- `n`: **Verified no functional dependency** or essential conceptual link.
+- `p`: Placeholder (unverified - requires investigation).
+- `s`/`S`: Semantic Similarity suggestion (requires verification for functional/deep conceptual link).
 
 ## VI. Mandatory Update Protocol (MUP) - Core File Updates
 
@@ -200,8 +211,9 @@ The MUP must be followed immediately after any state-changing action:
 1. **Update `activeContext.md`**: Summarize action, impact, and new state.
 2. **Update `changelog.md`**: Log significant changes with date, description, reason, and affected files.
 3. **Update `.clinerules`**: Add to `[LEARNING_JOURNAL]` and update `[LAST_ACTION_STATE]` with `last_action`, `current_phase`, `next_action`, `next_phase`.
-4. **Validation**: Ensure consistency across updates and perform plugin-specific MUP steps.
-5. **Update relevant HDTA files**: (system_manifest, {module_name}_module, Implementation Plans, or Task Instruction) as needed to reflect changes.
+4. **Remember**: In addition to these core updates after *every* state-changing action, a full MUP (including plugin-specific steps) **MUST** also be performed every 5 turns/interactions, as detailed in Section XIII.
+5. **Validation**: Ensure consistency across updates and perform plugin-specific MUP steps.
+6. **Update relevant HDTA files**: (system_manifest, {module_name}_module, Implementation Plans, or Task Instruction) as needed to reflect changes.
 
 ## VII. Command Execution Guidelines
 
@@ -215,12 +227,12 @@ The MUP must be followed immediately after any state-changing action:
 
 Located in `cline_utils/`. **All commands are executed via `python -m cline_utils.dependency_system.dependency_processor <command> [args...]`.** Most commands return a status message upon completion.
 
-**IMPORTANT: To ensure data consistency, conserve context window tokens, and leverage built-in parsing logic, ALWAYS use the `show-keys` and `show-dependencies` commands to retrieve key definitions and dependency information. Avoid directly reading tracker files (`*_tracker.md`, `*_module.md`) for this purpose unless absolutely necessary.**
+**IMPORTANT: To ensure data consistency, conserve context window tokens, and leverage built-in parsing logic, ALWAYS use the `show-keys` and `show-dependencies` commands to retrieve key definitions and dependency information from tracker files (`*_tracker.md`, `*_module.md`). Avoid using `read_file` on tracker files for this purpose.** Direct reading can lead to parsing errors and consumes excessive context.
 
 **Core Commands for CRCT Workflow:**
 
 1.  **`analyze-project [<project_root>] [--output <json_path>] [--force-embeddings] [--force-analysis]`**:
-    *   **Purpose**: The primary command for maintaining trackers. Analyzes the project (default: current directory), updates/generates keys, creates/updates tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers), generates embeddings, and suggests dependencies. Run this during Set-up/Maintenance and after significant code changes.
+    *   **Purpose**: The primary command for maintaining trackers. Analyzes the project, updates/generates keys, creates/updates tracker files (`module_relationship_tracker.md`, `doc_tracker.md`, mini-trackers), generates embeddings, and suggests dependencies. Run this during Set-up/Maintenance and after significant code changes.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor analyze-project`
     *   **Flags**: `--force-analysis` bypasses caches; `--force-embeddings` forces embedding recalculation.
 
@@ -228,23 +240,29 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
     *   **Purpose**: Displays all known outgoing and incoming dependencies (with paths) for a specific `<key>` by searching across *all* tracker files (main, doc, mini). Essential for understanding context before modifying a file.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
         *   **IMPORTANT**:    
-            *   **The key used with `show-dependencies` is the *row*, the dependencies returned are the *column*.**
-            *   When reviewing the output the keys listed are the *column* keys that have a dependency with the *row* key you provided to the `show-dependencies` command.
+            *   **The key used with `show-dependencies` is the *row*. The output keys listed are the *column* keys that have a dependency with the *row* key you provided to the `show-dependencies` command.
             
 3.  **`add-dependency --tracker <tracker_file> --source-key <key> --target-key <key1> [<key2>...] --dep-type <char>`**:
-    *   **Purpose**: Manually sets the **same** specified dependency relationship character (`--dep-type`) between **one** source key and **one or more** target keys in the specified `<tracker_file>`. Use this to correct suggestions from `analyze-project` or to explicitly mark verified relationships (including 'n' for no dependency).
-    *   **Example (Set dependency for multiple targets)**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd 1Be --dep-type ">"`
-    *   **Example (Set NO dependency for single target)**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd --dep-type "n"`
+    *   **Purpose**: Manually sets the specified dependency relationship (`--dep-type`) between one source key and one or more target keys *within the specified `<tracker_file>`*. Use this to correct suggestions or explicitly mark verified relationships (including 'n').
+    *   **Example**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd 1Be --dep-type ">"`
     *   *(Note: This command applies the *single* `--dep-type` to *all* specified target keys relative to the source key.)*
     *   *(Recommendation: Specify no more than five target keys at once for clarity.)*
 
-4.  **`remove-file <tracker_file> <file>`**:
-    *   **Purpose**: Removes a file's key, row, and column entirely from the specified `<tracker_file>`. Use when deleting or refactoring files out of existence.
-    *   **Example**: `python -m cline_utils.dependency_system.dependency_processor remove-file cline_docs/module_relationship_tracker.md src/utils/old_util.py`
+4.  **`remove-key <tracker_file> <key>`**:
+    *   **Purpose**: Removes a key and its corresponding row/column definition entirely from the specified `<tracker_file>`. Use when deleting or refactoring files/concepts associated with the key *out of that tracker's scope*. Note: This only affects the specified tracker. Run `analyze-project` afterwards to ensure consistency across all trackers if the underlying file/concept is truly gone.
+    *   **Example**: `python -m cline_utils.dependency_system.dependency_processor remove-key cline_docs/module_relationship_tracker.md 2Aa`
 
 5.  **`show-keys --tracker <tracker_file_path>`**:
-    *   **Purpose**: Extracts and displays *only* the key definitions section (between `---KEY_DEFINITIONS_START---` and `---KEY_DEFINITIONS_END---`) from the specified tracker file. Useful for quickly viewing keys without loading the entire grid.
+    *   **Purpose**: Displays the key definitions (`key: path`) defined *within* the specified tracker file. Crucially, it also checks the dependency grid *within that same tracker* and appends ` (placeholders present)` to any key whose corresponding row contains unresolved 'p' placeholders. Use this command *only* to identify keys needing investigation via the ` (placeholders present)` indicator. Do not attempt to manually interpret the raw grid. Use `show-dependencies` to view the specific relationships for a key before verification.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker cline_docs/doc_tracker.md`
+    *   **Output Example**:
+        ```
+        --- Keys Defined in doc_tracker.md ---
+        1A1: docs/intro.md
+        1A2: docs/setup.md (placeholders present)
+        2B1: docs/api/users.md
+        --- End of Key Definitions ---
+        ```
 
 **Utility Commands:**
 
@@ -332,14 +350,14 @@ The LLM **MUST** perform a complete Mandatory Update Protocol (MUP) every 5 turn
 **Procedure for 5-Turn MUP:**
 1. Count interactions since last MUP
 2. On the 5th turn, pause current task execution
-3. Perform full MUP as specified in Section VI:
+3. Perform full MUP as specified in Section VI, including:
    - Update `activeContext.md` with current progress
    - Update `changelog.md` with significant changes made to project files
    - Update `.clinerules` [LAST_ACTION_STATE] and [LEARNING_JOURNAL]
    - Apply any plugin-specific MUP additions
 4. Clean up completed tasks:
    - Mark completed steps in instruction files
-   - Update dependency trackers to reflect new relationships
+   - Update dependency trackers to reflect new relationships (if applicable, using `add-dependency` or potentially `analyze-project` if many changes occurred)
    - Archive or annotate completed task documentation
 5. Resume task execution only after MUP completion
 

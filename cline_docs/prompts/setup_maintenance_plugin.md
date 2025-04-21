@@ -55,48 +55,63 @@
 
 ## III. Analyzing and Verifying Tracker Dependencies
 
-**Objective**: Ensure trackers accurately reflect project dependencies, removing 'p' placeholders. **All tracker modifications MUST use `dependency_processor.py` commands.**
+**Objective**: Ensure trackers accurately reflect project dependencies, removing 'p' placeholders. **All tracker modifications MUST use `dependency_processor.py` commands.** **Do NOT read tracker files directly.**
 
 **Procedure:**
 
 1.  **Run Project Analysis (Initial & Updates)**:
-    *   Use `analyze-project` to automatically generate keys, analyze files, suggest dependencies (based on imports and semantic similarity), and update all trackers (`module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers). This should populate the grid, potentially with 'p', 's', 'S', '<', '>', 'x', or 'd' characters.
+    *   Use `analyze-project` to automatically generate/update keys, analyze files, suggest dependencies, and update *all* trackers (`module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers). This command creates trackers if they don't exist and populates/updates the grid.
     ```bash
     python -m cline_utils.dependency_system.dependency_processor analyze-project
     ```
     *   *(Optional: Add `--force-analysis` or `--force-embeddings` if needed)*.
-    *   **Review logs (`debug.txt`, `suggestions.log`)** for analysis details and suggested changes.
+    *   **Review logs (`debug.txt`, `suggestions.log`)** for analysis details and suggested changes, but prioritize the workflow below for verification.
 
-2.  **Review and Verify Placeholders ('p') and Suggestions ('s', 'S')**:
-    *   **IMPORTANT**: Use `show-keys` or `show-dependencies` commands to inspect tracker content. **Avoid** using `read_file` on *tracker* files directly to save context and ensure correct parsing.
-    **All files must be explicitly verified by reading.**
-    *   For each relationship marked with 'p', 's', or 'S':
-        *   Use `show-dependencies --key <key>` to understand the full context (dependencies) of related files.
-        *   **IMPORTANT**:    
-            *   **The key used with `show-dependencies` is the *row*, the dependencies returned are the *column*.**
-            *   When reviewing the output the keys listed are the *column* keys that have a dependency with the *row* key you provided to the `show-dependencies` command.
-        *   *(If you only need to see the key definitions for a specific tracker, use `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker <path>` for efficiency.)*
-        *   Examine the source code or documentation of the *related files* from `show-dependencies` themselves using `read_file` (e.g., `read_file <path_from_show_dependencies_output>`).
-        *   **Note:** If `show-dependencies` lists keys that are not present in the tracker you are currently inspecting (e.g., code file keys in `doc_tracker.md`), these dependencies belong in a different tracker (like `module_relationship_tracker.md` or mini-trackers) and should be addressed there. Do not attempt to set these dependencies in the current tracker.
-        *   Determine the correct dependency relationship (or confirm 'n' - no dependency). Record the verification of s/S for that key in .clinerules [LEARNING_JOURNAL]. Refer to **IV.1 Dependency Characters**.
-        *   When determing the dependency relation between files, determine if one or both **functionally relies** on the other, or if one document provides information that another *relies* on when writing code related to the other document's content**. If neither is the case, assign 'n' (no dependency).
-        *one document must directly rely on the information in the other for its own content or implementation detail*
-3.  **Correct/Confirm Dependencies**:
-    *   If a 'p', 's', or 'S' needs to be changed to a specific relationship ('<', '>', 'x', 'd', 'n'):
-        *   Use `add-dependency` to set the correct character. This command can now accept multiple target keys.
+2.  **Identify Keys Needing Verification (Using `show-keys`)**:
+    *   For each primary tracker (`module_relationship_tracker.md`, `doc_tracker.md`) and relevant mini-trackers:
+        *   Run the `show-keys` command.
         ```bash
-        # Example: Set dependency between 2Aa and multiple targets (3Aa, 3Ab) in main tracker
-        `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aa 3Ab --dep-type ">"`
-        
-        # Example: Set NO dependency ('n') between 2Aa and a single target 3Aa
-        `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 3Aa --dep-type "n"`
+        python -m cline_utils.dependency_system.dependency_processor show-keys --tracker <tracker_file_path>
         ```
-        *(Note: --target-key accepts multiple keys. The specified `--dep-type` is applied to *all* targets.)*
-        *(Recommendation: Specify no more than five target keys at once for clarity.)*
-    *   If a suggested relationship ('<', '>', 'x', 'd') seems incorrect, use `add-dependency` to set the correct character (e.g., 'n' if there's no dependency, or '<' if the direction is wrong).
-4.  **Iterate and Complete**: Repeat steps 2 and 3 until no 'p' placeholders remain in all trackers. Prioritize clearing these before moving to Strategy phase.
+        *   Examine the output. Identify all lines ending with ` (placeholders present)`. These indicate keys defined *in this tracker* whose dependency row *in this tracker's grid* contains unverified 'p' relationships.
+        *   Create a list of these keys (e.g., `['1A2', '3Bc1']`) for the current tracker.
 
-5.  **MUP**: Apply Core MUP and Section VII additions after each verification/correction session and upon completion of primary tracker verification.
+3.  **Verify Placeholders ('p') and Suggestions ('s', 'S') for Identified Keys**:
+    *   Iterate through the list of keys identified in the previous step for the *current tracker*.
+    *   For each `key_string` in the list:
+        *   **Get Context with `show-dependencies`**: Run `show-dependencies` for this key. This command searches *across all trackers* to show *all* known relationships involving this key (both incoming and outgoing), providing crucial context.
+          ```bash
+          python -m cline_utils.dependency_system.dependency_processor show-dependencies --key <key_string>
+          ```
+        *   **Analyze Output**: Review the output of `show-dependencies`. Pay attention to relationships marked as 'p', 's', or 'S' where `<key_string>` is the row key. Note the *column keys* and their associated *paths* involved in these 'p', 's', or 'S' relationships.
+        *   **Examine Source Files**: Use `read_file` to examine the content of the file associated with `<key_string>` (the row) AND the files associated with the relevant *column keys* identified in the previous step.
+        *   **Determine Correct Relationship (CRITICAL STEP)**: Based on your analysis of the file contents, determine the **true underlying relationship**.
+            *   **Go Beyond Surface Similarity**: The 's' and 'S' suggestions from `analyze-project` are based on semantic similarity, which might only indicate related topics, not necessarily a *dependency* needed for operation or understanding.
+            *   **Focus on Functional Reliance**: Ask:
+                *   Does the code in the *row file* directly **import, call, or inherit from** code in the *column file*? (Leads to '<' or 'x').
+                *   Does the code in the *column file* directly **import, call, or inherit from** code in the *row file*? (Leads to '>' or 'x').
+                *   Does the documentation in the *row file* **require information or definitions** present *only* in the *column file* to be complete or accurate? (Leads to '<' or 'd').
+                *   Is the *row file* **essential documentation** for understanding or implementing the concepts/code in the *column file*? (Leads to 'd' or potentially '>').
+                *   Is there a **deep, direct conceptual link** where understanding or modifying one file *necessitates* understanding the other, even without direct code imports? (Consider '<', '>', 'x', or 'd' based on the nature of the link).
+            *   **Purpose of Dependencies**: Remember, these verified dependencies guide the **Strategy phase** (determining task order) and the **Execution phase** (loading minimal necessary context). A dependency should mean "You *need* to consider/load the related file to work effectively on this one."
+            *   **Assign 'n' if No True Dependency**: If the relationship is merely thematic, uses similar terms, or is indirect, assign 'n' (verified no dependency). **It is better to mark 'n' than to create a weak dependency.**
+            *   **Record Verification**: If you are confirming or changing an 's'/'S' suggestion, briefly note the *reasoning* for the final dependency type (or 'n') in the `.clinerules [LEARNING_JOURNAL]`. Example: "Verified `1A2 -> 2B1` as '>' because 1A2's class inherits from a base class in 2B1, overriding initial 'S' suggestion."
+        *   **Correct/Confirm Dependencies with `add-dependency`**: Use the `add-dependency` command, targeting the *current tracker file* you are verifying. Set the correct dependency character between the row key (`--source-key <key_string>`) and the specific column key(s) (`--target-key <column_key_1> [<column_key_2>...]`) you just verified. You can update multiple target relationships for the *same source key* in one command if they share the same new dependency type.
+          ```bash
+          # Example: Set '>' from 1A2 to 2B1 in doc_tracker.md
+          python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/doc_tracker.md --source-key 1A2 --target-key 2B1 --dep-type ">"
+
+          # Example: Set 'n' from 1A2 to 3C1 and 3C2 in doc_tracker.md
+          python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/doc_tracker.md --source-key 1A2 --target-key 3C1 3C2 --dep-type "n"
+          ```
+          *(Recommendation: Handle only a few target keys per `add-dependency` command for clarity.)*
+
+4.  **Iterate and Complete**:
+    *   Repeat Step 3 for all keys identified with `(placeholders present)` in the current tracker.
+    *   Run `show-keys --tracker <tracker_file_path>` again to confirm no `(placeholders present)` remain for that tracker.
+    *   Repeat Steps 2-4 for all relevant tracker files. Prioritize clearing placeholders in `doc_tracker.md` and `module_relationship_tracker.md` before moving to the Strategy phase.
+
+5.  **MUP**: Apply Core MUP and Section VII additions after each significant verification session (e.g., after clearing placeholders for one tracker) and upon completion of primary tracker verification.
 
 ## IV. Dependency Tracker Management (Details)
 *(Dependency character definitions are in the Core System Prompt, Section V)*
@@ -124,30 +139,31 @@
 -   **`reset-config`**: Resets all configuration settings in `.clinerules.config.json` to their default values.
     -   *Example*: `python -m cline_utils.dependency_system.dependency_processor reset-config`
 
-*Note: For a full list of commands, refer to the Core System Prompt. This plugin focuses on the commands most relevant for setup and maintenance.*
-
-*Key commands used in this phase include `analyze-project`, `show-dependencies`, `add-dependency`, `update-config`, `reset-config`, and `remove-dependency` as detailed in the procedures above.*
+*Note: Key commands used in this phase include `analyze-project`, `show-dependencies`, `add-dependency`, `update-config`, `reset-config`, and `remove-key` as detailed in the procedures above.*
 
 ### IV.5 Set-up/Maintenance Dependency Workflow
 ```mermaid
 flowchart TD
     A[Start Set-up/Maintenance] --> B(Run<br>analyze-project);
-    B --> C{Review Trackers & Logs};
-    C --> D{"Placeholders ('p') or Suggestions ('s'/'S') Found?"};
-    D -- Yes --> E[Identify Relationship];
-    E --> M(check .clinerules for verified s/S key relationships<br>If exists move to next key<br>If not, continue);
-    M -->F("Use<br>show-dependencies --key [key]");
-    F --> G(Read Related Files);
-    G --> H{Determine Correct Character};
-    H --> I(Use<br>add-dependency<br>or<br>remove-dependency);
-    I --> L(Add keys with verified s/S to .clinerules Learning_Journal);
-    L -->C;
-    D -- No --> J[Trackers Verified];
-    J --> K[End Set-up/Maintenance Phase];
+    B --> C{Review Logs (Optional)};
+    C --> D(Select Tracker File);
+    D --> E(Use<br>show-keys --tracker);
+    E --> F{Placeholders Indicated?};
+    F -- Yes --> G[Identify Key with '(placeholders present)'];
+    G --> H(Use<br>show-dependencies --key [key]);
+    H --> I(Read Related Source Files<br>Based on show-dependencies output);
+    I --> J{Determine Correct<br>Character(s)};
+    J --> K(Use<br>add-dependency<br>--tracker [current tracker]<br>--source-key [key]<br>--target-key [...]<br>--dep-type [...]);
+    K --> L(Record s/S Verification<br>in .clinerules [LEARNING_JOURNAL]);
+    L --> E;  // Check keys again for the *same* tracker
+    F -- No --> M{All Trackers Checked?};
+    M -- No --> D; // Select next tracker
+    M -- Yes --> N[Trackers Verified];
+    N --> O[End Set-up/Maintenance Phase];
 
-    subgraph Verification Loop
+    subgraph Verification Loop for One Key
         direction LR
-        E; F; G; H; I; L; M;
+        H; I; J; K; L;
     end
 ```
 

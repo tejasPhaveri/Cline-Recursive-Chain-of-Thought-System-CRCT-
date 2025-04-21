@@ -417,45 +417,79 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
     return 0
 
 def handle_show_keys(args: argparse.Namespace) -> int:
-    """Handle the show-keys command."""
+    """
+    Handle the show-keys command.
+    Displays key definitions from the specified tracker file.
+    Additionally, checks if the corresponding row in the grid contains
+    any 'p' (placeholder) characters and indicates this in the output.
+    """
     tracker_path = normalize_path(args.tracker)
-    logger.info(f"Attempting to show keys from tracker: {tracker_path}")
+    logger.info(f"Attempting to show keys and placeholder status from tracker: {tracker_path}")
 
     if not os.path.exists(tracker_path):
         print(f"Error: Tracker file not found: {tracker_path}", file=sys.stderr)
         logger.error(f"Tracker file not found: {tracker_path}")
         return 1
 
-    in_definitions_section = False
-    start_marker_found = False
-    end_marker_found = False
-
     try:
-        with open(tracker_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                stripped_line = line.strip()
-                if stripped_line == KEY_DEFINITIONS_START_MARKER:
-                    in_definitions_section = True
-                    start_marker_found = True
-                    continue # Don't print the marker itself
-                elif stripped_line == KEY_DEFINITIONS_END_MARKER:
-                    in_definitions_section = False
-                    end_marker_found = True
-                    break # Stop processing after end marker
+        # Use read_tracker_file to parse keys and grid structure
+        tracker_data = read_tracker_file(tracker_path)
 
-                if in_definitions_section:
-                    print(line, end='') # Print the line including original newline
+        if not tracker_data:
+            # read_tracker_file already logs errors if parsing fails
+            print(f"Error: Could not read or parse tracker file: {tracker_path}", file=sys.stderr)
+            return 1
 
-        if not start_marker_found:
-            print(f"Warning: Start marker '{KEY_DEFINITIONS_START_MARKER}' not found in {tracker_path}", file=sys.stderr)
-            logger.warning(f"Start marker not found in {tracker_path}")
-        # Only warn about missing end marker if start marker was found
-        elif not end_marker_found:
-            print(f"Warning: End marker '{KEY_DEFINITIONS_END_MARKER}' not found after start marker in {tracker_path}. Output may be incomplete.", file=sys.stderr)
-            logger.warning(f"End marker not found after start marker in {tracker_path}")
+        keys_map = tracker_data.get("keys")
+        grid_map = tracker_data.get("grid")
 
-        # Success is 0 even if markers missing (warnings printed)
-        return 0
+        if not keys_map:
+            print(f"Error: No keys found in tracker file: {tracker_path}", file=sys.stderr)
+            logger.error(f"No key definitions found in {tracker_path}")
+            # Allow proceeding if grid is missing, but warn
+            if not grid_map:
+                logger.warning(f"Grid data also missing in {tracker_path}")
+            return 1 # Considered an error state if keys are missing
+
+        # Sort keys hierarchically for consistent output
+        sorted_keys = sort_key_strings_hierarchically(list(keys_map.keys()))
+
+        print(f"--- Keys Defined in {os.path.basename(tracker_path)} ---") # Header for clarity
+
+        for key_string in sorted_keys:
+            file_path = keys_map.get(key_string, "PATH_UNKNOWN")
+            placeholder_indicator = ""
+
+            # Check the grid for placeholders *only if* the grid exists
+            if grid_map:
+                compressed_row = grid_map.get(key_string, "")
+                if 'p' in compressed_row:
+                    # Check specifically for 'p' character, not as part of a count like '10p'
+                    # This simple check works because 'p' won't appear in counts (which are digits)
+                    placeholder_indicator = " (placeholders present)"
+                elif not compressed_row:
+                     # Indicate if a key exists but has no corresponding grid row yet
+                     placeholder_indicator = " (grid row missing)"
+                     logger.warning(f"Key '{key_string}' found in definitions but missing from grid in {tracker_path}")
+
+
+            print(f"{key_string}: {file_path}{placeholder_indicator}")
+
+        print("--- End of Key Definitions ---")
+
+        # Optional: Check for raw markers for debugging/completeness, but don't rely on them for key extraction
+        try:
+            with open(tracker_path, 'r', encoding='utf-8') as f_check:
+                content = f_check.read()
+                if KEY_DEFINITIONS_START_MARKER not in content:
+                     logger.warning(f"Start marker '{KEY_DEFINITIONS_START_MARKER}' not found in {tracker_path}")
+                if KEY_DEFINITIONS_END_MARKER not in content:
+                     logger.warning(f"End marker '{KEY_DEFINITIONS_END_MARKER}' not found in {tracker_path}")
+        except Exception:
+             logger.warning(f"Could not perform marker check on {tracker_path}")
+
+
+        return 0 # Success
 
     except IOError as e:
         print(f"Error reading tracker file {tracker_path}: {e}", file=sys.stderr)
@@ -549,7 +583,7 @@ def main():
     show_deps_parser.set_defaults(func=handle_show_dependencies)
 
     # --- Show Keys Command ---
-    show_keys_parser = subparsers.add_parser("show-keys", help="Show only the key definitions from a tracker file")
+    show_keys_parser = subparsers.add_parser("show-keys", help="Show key definitions from a tracker, indicating placeholders")
     show_keys_parser.add_argument("--tracker", required=True, help="Path to the tracker file (.md)")
     show_keys_parser.set_defaults(func=handle_show_keys)
 

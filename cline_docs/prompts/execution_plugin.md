@@ -181,9 +181,9 @@ When encountering errors with `dependency_processor.py` commands:
     *   **Tracker Not Found**: Verify the `--tracker` path is correct.
     *   **Key Not Found**: Ensure `--source-key` and `--target-key` exist in the specified tracker. Run `analyze-project` if needed.
     *   **Grid Errors**: If the tracker file is corrupted, running `analyze-project` might fix it by regenerating keys and structure. If not, manual inspection or restoring from backup (`cline_docs/backups/`) might be needed.
-5.  **`remove-file` Errors**:
-    *   **Tracker/File Not Found**: Verify paths are correct.
-    *   **Grid Errors**: Similar to `add-dependency`, try `analyze-project`.
+5.  **`remove-key` Errors**:
+    *   **Tracker/Key Not Found**: Verify the tracker path (`<tracker_file>`) and the key (`<key>`) are correct and that the key exists within that specific tracker's definitions. Run `show-keys --tracker <tracker_file>` to check key existence in that tracker.
+    *   **Grid Errors**: Less likely for `remove-key` itself, but if the tracker is corrupt, running `analyze-project` might help fix the overall structure. If not, manual inspection or restoring from backup (`cline_docs/backups/`) might be needed.
 6.  **General Tips**:
     *   Use `clear-caches` if you suspect outdated cache data is causing issues.
     *   Ensure you are running commands from the project root directory.
