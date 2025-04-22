@@ -616,6 +616,10 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                 row_is_dir = row_info.is_directory
                 col_is_dir = col_info.is_directory
 
+                # Check if this pair has already been processed (due to reciprocal setting)
+                if structural_deps.get(row_key_str, {}).get(col_key_str) is not None:
+                    continue
+
                 # Case 1: Directory <-> Item (File or Dir) *within* its subtree
                 if row_is_dir and is_subpath(col_info.norm_path, row_info.norm_path):
                     # Mutual dependency 'x' for anything contained within a directory
@@ -631,19 +635,14 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                     # logger.debug(f"  Structural Rule: Setting {row_key_str} <-> {col_key_str} = 'x' (Contained-In-Dir)")
 
                 # Case 3: Directory <-> Item *outside* its subtree
-                # Check if structural dependency hasn't already been set (e.g., by cases 1 or 2)
-                elif row_is_dir and structural_deps.get(row_key_str, {}).get(col_key_str) is None:
-                    # If row is a dir and col is NOT a subpath of row, set 'n'
-                    # The is_subpath check inherently handles the case where col is the dir itself or a parent
-                    if not is_subpath(col_info.norm_path, row_info.norm_path):
-                        structural_deps[row_key_str][col_key_str] = 'n'
-                        # logger.debug(f"  Structural Rule: Setting {row_key_str} -> {col_key_str} = 'n' (Dir-Outside)")
-                elif col_is_dir and structural_deps.get(row_key_str, {}).get(col_key_str) is None:
-                     # If col is a dir and row is NOT a subpath of col, set 'n'
-                    if not is_subpath(row_info.norm_path, col_info.norm_path):
-                         # We only need to set one direction typically, but setting both is fine for 'n'
-                         structural_deps[col_key_str][row_key_str] = 'n'
-                         # logger.debug(f"  Structural Rule: Setting {col_key_str} -> {row_key_str} = 'n' (Outside-Dir)")
+                elif row_is_dir and not is_subpath(col_info.norm_path, row_info.norm_path):
+                    structural_deps[row_key_str][col_key_str] = 'n'
+                    structural_deps[col_key_str][row_key_str] = 'n' # *** Set both directions for 'n' ***
+                    # logger.debug(f"  Structural Rule: Setting {row_key_str} -> {col_key_str} = 'n' (Dir-Outside)")
+                elif col_is_dir and not is_subpath(row_info.norm_path, col_info.norm_path):
+                    structural_deps[row_key_str][col_key_str] = 'n'
+                    structural_deps[col_key_str][row_key_str] = 'n'
+                    # logger.debug(f"  Structural Rule: Setting {col_key_str} -> {row_key_str} = 'n' (Outside-Dir)")
 
         # --- Filter semantic suggestions ---
         # Keep suggestions only if they are NOT overridden by a structural rule ('x' or 'n')
