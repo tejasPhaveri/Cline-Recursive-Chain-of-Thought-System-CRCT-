@@ -584,19 +584,85 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
     elif tracker_type == "doc":
         output_file = doc_tracker_data["get_tracker_path"](project_root)
         # Filter returns Dict[norm_path, KeyInfo] for items under doc roots
-        filtered_doc_info = doc_tracker_data["file_inclusion"](project_root, path_to_key_info)
+        # This map includes KeyInfo for both files and directories within doc roots
+        filtered_doc_info_map: Dict[str, KeyInfo] = doc_tracker_data["file_inclusion"](project_root, path_to_key_info)
+
         # Definitions include ALL filtered items (files and directories)
-        final_key_defs = {info.key_string: info.norm_path for info in filtered_doc_info.values()}
+        final_key_defs = {info.key_string: info.norm_path for info in filtered_doc_info_map.values()}
         # Grid keys MUST match the definition keys
         relevant_keys_for_grid = list(final_key_defs.keys()) # Use all keys from definitions
 
         logger.info(f"Doc tracker update. Definitions: {len(final_key_defs)} items. Grid keys: {len(relevant_keys_for_grid)}.")
+
+        # --- Prepare initial dependency map for structural rules ---
+        # This map will store predetermined 'x' and 'n' based on hierarchy
+        structural_deps = defaultdict(dict) # {row_key: {col_key: char}}
+
+        # Pre-calculate structural dependencies ('x' for parent-child, 'n' for dir-non-child)
+        logger.debug("Applying structural dependency rules for doc tracker directories/files...")
+        key_string_to_info = {info.key_string: info for info in filtered_doc_info_map.values()}
+        sorted_grid_keys = sort_key_strings_hierarchically(relevant_keys_for_grid) # Sort once for consistency
+
+        for row_key_str in sorted_grid_keys:
+            row_info = key_string_to_info.get(row_key_str)
+            if not row_info: continue # Should not happen if derived correctly
+
+            for col_key_str in sorted_grid_keys:
+                if row_key_str == col_key_str: continue # Skip diagonal
+                col_info = key_string_to_info.get(col_key_str)
+                if not col_info: continue
+
+                # --- Refined Structural Logic ---
+                row_is_dir = row_info.is_directory
+                col_is_dir = col_info.is_directory
+
+                # Case 1: Directory <-> Item (File or Dir) *within* its subtree
+                if row_is_dir and is_subpath(col_info.norm_path, row_info.norm_path):
+                    # Mutual dependency 'x' for anything contained within a directory
+                    structural_deps[row_key_str][col_key_str] = 'x'
+                    structural_deps[col_key_str][row_key_str] = 'x'
+                    # logger.debug(f"  Structural Rule: Setting {row_key_str} <-> {col_key_str} = 'x' (Dir-Contains)")
+
+                # Case 2: Item (File or Dir) <-> Directory containing it
+                elif col_is_dir and is_subpath(row_info.norm_path, col_info.norm_path):
+                    # Same as above, just roles reversed
+                    structural_deps[row_key_str][col_key_str] = 'x'
+                    structural_deps[col_key_str][row_key_str] = 'x'
+                    # logger.debug(f"  Structural Rule: Setting {row_key_str} <-> {col_key_str} = 'x' (Contained-In-Dir)")
+
+                # Case 3: Directory <-> Item *outside* its subtree
+                # Check if structural dependency hasn't already been set (e.g., by cases 1 or 2)
+                elif row_is_dir and structural_deps.get(row_key_str, {}).get(col_key_str) is None:
+                    # If row is a dir and col is NOT a subpath of row, set 'n'
+                    # The is_subpath check inherently handles the case where col is the dir itself or a parent
+                    if not is_subpath(col_info.norm_path, row_info.norm_path):
+                        structural_deps[row_key_str][col_key_str] = 'n'
+                        # logger.debug(f"  Structural Rule: Setting {row_key_str} -> {col_key_str} = 'n' (Dir-Outside)")
+                elif col_is_dir and structural_deps.get(row_key_str, {}).get(col_key_str) is None:
+                     # If col is a dir and row is NOT a subpath of col, set 'n'
+                    if not is_subpath(row_info.norm_path, col_info.norm_path):
+                         # We only need to set one direction typically, but setting both is fine for 'n'
+                         structural_deps[col_key_str][row_key_str] = 'n'
+                         # logger.debug(f"  Structural Rule: Setting {col_key_str} -> {row_key_str} = 'n' (Outside-Dir)")
+
+        # --- Filter semantic suggestions ---
+        # Keep suggestions only if they are NOT overridden by a structural rule ('x' or 'n')
+        # and if both source and target are in the final defs
         if suggestions:
+             logger.debug("Filtering semantic suggestions against structural rules...")
              for src_key, targets in suggestions.items():
                   # Only include suggestions where source and target are in the final defs
                   if src_key in final_key_defs:
-                       filtered_targets = [(tgt, c) for tgt, c in targets if tgt in final_key_defs]
-                       if filtered_targets: final_suggestions_to_apply[src_key].extend(filtered_targets)
+                       valid_targets = []
+                       for tgt, char in targets:
+                            if tgt in final_key_defs:
+                                 # Check if this pair has a pre-defined structural dependency
+                                 structural_char = structural_deps.get(src_key, {}).get(tgt)
+                                 if structural_char is None: # No structural rule applies, keep suggestion
+                                      valid_targets.append((tgt, char))
+                                 # else: logger.debug(f"  Suggestion {src_key}->{tgt} ('{char}') overridden by structural rule ('{structural_char}')")
+                       if valid_targets:
+                           final_suggestions_to_apply[src_key].extend(valid_targets)
 
     elif tracker_type == "mini":
         # --- Mini Tracker Specific Logic ---
@@ -805,6 +871,18 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
         row_list = [PLACEHOLDER_CHAR] * len(final_sorted_keys_list); row_idx = final_key_to_idx.get(row_key)
         if row_idx is not None: row_list[row_idx] = DIAGONAL_CHAR
         temp_decomp_grid[row_key] = row_list
+    if tracker_type == "doc" and structural_deps:
+         logger.debug("Applying pre-calculated structural dependencies ('x', 'n') to grid...")
+         for row_key, cols in structural_deps.items():
+              if row_key in final_key_to_idx: # Ensure row exists in final grid
+                  for col_key, dep_char in cols.items():
+                       if col_key in final_key_to_idx: # Ensure col exists in final grid
+                           row_idx = final_key_to_idx[row_key]
+                           col_idx = final_key_to_idx[col_key]
+                           if row_idx != col_idx: # Don't overwrite diagonal
+                                temp_decomp_grid[row_key][col_idx] = dep_char
+                                # logger.debug(f"  Applied structural rule: {row_key} -> {col_key} = '{dep_char}'")
+
     # Copy old values using the OLD sorted list for indexing into decompressed old rows
     for old_row_key, compressed_row in existing_grid.items():
         if old_row_key in final_key_to_idx: # Only process rows still present
@@ -817,7 +895,12 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                              # If the old column key is still in the final grid
                              if old_col_key in final_key_to_idx:
                                  new_col_idx = final_key_to_idx[old_col_key]; new_row_idx = final_key_to_idx[old_row_key]
-                                 if new_row_idx != new_col_idx: temp_decomp_grid[old_row_key][new_col_idx] = value
+                                 if new_row_idx != new_col_idx:
+                                    # *** Check if a structural rule already set this cell ***
+                                    structural_char = structural_deps.get(old_row_key, {}).get(old_col_key) if tracker_type == "doc" else None
+                                    if structural_char is None:
+                                        temp_decomp_grid[old_row_key][new_col_idx] = value
+                                    else: logger.debug(f"  Skipping copy of old value for {old_row_key}->{old_col_key} due to structural rule '{structural_char}'")
                 else: logger.warning(f"Grid Rebuild: Row length mismatch for '{old_row_key}' in {output_file} (Expected: {len(old_keys_list)}, Got: {len(decomp_row)}). Skipping.")
             except Exception as e: logger.warning(f"Grid Rebuild: Error processing row '{old_row_key}' in {output_file}: {e}. Skipping.")
 
@@ -829,19 +912,48 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
             if row_key not in final_key_to_idx: continue
             current_decomp_row = temp_decomp_grid.get(row_key)
             if not current_decomp_row: continue
-            for col_key, dep_char in deps:
+
+            for col_key, dep_char in deps: # dep_char is the SUGGESTED character
                 if col_key not in final_key_to_idx: continue
                 if row_key == col_key: continue
-                col_idx = final_key_to_idx[col_key]; existing_char = current_decomp_row[col_idx]
+
+                col_idx = final_key_to_idx[col_key]; existing_char = current_decomp_row[col_idx] # Character already in the grid
+
+                # Apply suggestion ONLY if the current character is a placeholder ('p')
                 if existing_char == PLACEHOLDER_CHAR and dep_char != PLACEHOLDER_CHAR:
                     current_decomp_row[col_idx] = dep_char
                     if not suggestion_applied: final_last_grid_edit = f"Applied suggestions ({datetime.datetime.now().isoformat()})"
                     suggestion_applied = True
-                    # logger.debug(f"Applied suggestion: {row_key} -> {col_key} ({dep_char}) in {output_file}")
+                    logger.debug(f"Applied suggestion: {row_key} -> {col_key} ({dep_char}) in {output_file}")
+
+                # Handle conflicts ONLY if suggestion wasn't applied (i.e., existing_char != 'p')
+                # and the suggestion is different from the existing char
                 elif existing_char != PLACEHOLDER_CHAR and existing_char != DIAGONAL_CHAR and existing_char != dep_char:
-                     warning_msg = (f"Suggestion Conflict in {os.path.basename(output_file)}: For {row_key}->{col_key}, grid has '{existing_char}', suggestion is '{dep_char}'. Grid value kept.")
-                     logger.warning(warning_msg); print(f"WARNING: {warning_msg}") # Reduce console noise
-            temp_decomp_grid[row_key] = current_decomp_row
+                    # --- Refined Warning Logic ---
+                    try:
+                        existing_priority = get_priority(existing_char)
+                        suggestion_priority = get_priority(dep_char)
+
+                        # Only warn if the suggestion is STRONGER (higher priority number)
+                        # than the existing character, AND the existing character is NOT 'n'.
+                        # 'n' represents a manual override that suggestions should never overwrite or warn about.
+                        if existing_char != 'n' and suggestion_priority > existing_priority:
+                            # Example scenario: existing='s' (low priority), suggestion='S' (higher priority) -> WARN
+                            warning_msg = (f"Suggestion Conflict in {os.path.basename(output_file)}: For {row_key}->{col_key}, "
+                                           f"grid has '{existing_char}' (priority {existing_priority}), "
+                                           f"suggestion is '{dep_char}' (priority {suggestion_priority}). Grid value kept.")
+                            logger.warning(warning_msg)
+                        # else: # Optionally log non-warnings at DEBUG level
+                            # logger.debug(f"Suggestion Ignored (No Warn): {row_key}->{col_key}, grid='{existing_char}', sugg='{dep_char}'")
+
+                    except KeyError as e:
+                        # Handle case where a character might not be in the priority map
+                        logger.error(f"Character priority lookup failed for '{str(e)}' during suggestion conflict check. Grid value kept.")
+                    except Exception as e:
+                        logger.error(f"Error during suggestion priority check: {e}. Grid value kept.")
+
+            temp_decomp_grid[row_key] = current_decomp_row # Update the row in the temp grid
+
 
     # Compress the final grid state
     final_grid = {key: compress("".join(row_list)) for key, row_list in temp_decomp_grid.items()}
