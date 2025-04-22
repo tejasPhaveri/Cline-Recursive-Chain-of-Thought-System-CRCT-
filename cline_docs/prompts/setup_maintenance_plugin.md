@@ -83,8 +83,8 @@
           ```bash
           python -m cline_utils.dependency_system.dependency_processor show-dependencies --key <key_string>
           ```
-        *   **Analyze Output**: Review the output of `show-dependencies`. Pay attention to relationships marked as 'p', 's', or 'S' where `<key_string>` is the row key. Note the *column keys* and their associated *paths* involved in these 'p', 's', or 'S' relationships.
-        *   **Examine Source Files**: Use `read_file` to examine the content of the file associated with `<key_string>` (the row) AND the files associated with the relevant *column keys* identified in the previous step.
+        *   **Analyze Output & Plan Efficient Reading**: Review the `show-dependencies` output. Identify *all* target keys associated with the current `source_key` that show 'p', 's', or 'S' relationships. **To improve efficiency, plan to read the source file (`<key_string>`) and *multiple* relevant target files together in the next step.** If several target files reside in the same directory, consider asking the user if they can provide the directory contents using a command like `@add folder path/to/relevant/directory` to load them all at once.
+        *   **Examine Source Files (Batch Preferred)**: Use `read_file` to examine the content of the source file (`<key_string>`) AND the batch of relevant target files identified in the previous step. If the user provided folder contents, analyze those.
         *   **Determine Correct Relationship (CRITICAL STEP)**: Based on your analysis of the file contents, determine the **true underlying relationship**.
             *   **Go Beyond Surface Similarity**: The 's' and 'S' suggestions from `analyze-project` are based on semantic similarity, which might only indicate related topics, not necessarily a *dependency* needed for operation or understanding.
             *   **Focus on Functional Reliance**: Ask:
@@ -106,6 +106,7 @@
           # Reasoning: Files 3C1 and 3C2 are unrelated examples and have no functional dependency on the setup guide 1A2.
           python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/doc_tracker.md --source-key 1A2 --target-key 3C1 3C2 --dep-type "n"
           ```
+          (Focus on batching targets for the *same source key* and *same dependency type* per command.)
           *(Recommendation: Handle only a few target keys per `add-dependency` command for clarity.)*
 
 4.  **Iterate and Complete**:

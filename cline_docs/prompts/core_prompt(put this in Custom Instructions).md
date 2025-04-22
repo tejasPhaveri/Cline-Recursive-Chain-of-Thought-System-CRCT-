@@ -245,8 +245,12 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
     *   **Purpose**: Manually sets the specified dependency relationship (`--dep-type`) between one **source key** (`--source-key`) and one or more **target keys** (`--target-key`) *within the specified `<tracker_file>`*. Use this to correct suggestions or explicitly mark verified relationships (including 'n').
     *   **Workflow Note**: During the verification process described in the Set-up/Maintenance plugin, the key initially provided to `show-dependencies` **always serves as the `--source-key`** for this command. The related column keys identified from the `show-dependencies` output are used as the `--target-key`(s).
     *   **IMPORTANT**: Before executing this command during the verification process (Set-up/Maintenance), you **MUST** state your reasoning for choosing the specific `--dep-type` based on your analysis of functional reliance between the source and target files/concepts.
-    *   **Example**: `python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd 1Be --dep-type ">"`
-    *   *(Note: This command applies the *single* `--dep-type` to *all* specified target keys relative to the source key.)*
+    **Example**:
+    ```python
+    python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker cline_docs/module_relationship_tracker.md --source-key 2Aa --target-key 1Bd 1Be --dep-type ">"
+     ```
+    *(Note: This command applies the *single* `--dep-type` to *all* specified target keys relative to the source key.)*
+    *(Efficiency Tip: When verifying dependencies for a single source key, group multiple target keys that require the *same* dependency type into one command execution using multiple `--target-key` arguments.)*
     *   *(Recommendation: Specify no more than five target keys at once for clarity.)*
 
 4.  **`remove-key <tracker_file> <key>`**:
