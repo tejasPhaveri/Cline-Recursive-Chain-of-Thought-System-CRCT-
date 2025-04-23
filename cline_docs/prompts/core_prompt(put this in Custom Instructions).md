@@ -185,15 +185,17 @@ flowchart TD
 
 ## V. Dependency Tracker Management (Overview)
 
-`module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers are critical for mapping the project's structure and interconnections. Detailed management steps are in the Set-up/Maintenance Plugin (`cline_docs/prompts/setup_maintenance_plugin.md`). **All tracker management MUST be done using the `dependency_processor.py` script.** Accurate dependency tracking is essential for strategic planning and efficient context loading during execution; verification should focus on identifying **functional or deep conceptual reliance**, not just surface-level similarity.
+`module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers (`*_module.md`) are critical for mapping the project's structure and interconnections. Detailed management steps are in the Set-up/Maintenance Plugin (`cline_docs/prompts/setup_maintenance_plugin.md`). **All tracker management MUST be done using the `dependency_processor.py` script.** Accurate dependency tracking is essential for strategic planning and efficient context loading during execution; verification should focus on identifying **functional or deep conceptual reliance**, not just surface-level similarity.
 
-**Tracker Overview Table:**
+**Tracker Overview Table & Verification Order:**
 
-| Tracker                | Scope                                      | Granularity           | Location                                  | Priority (Set-up/Maintenance) |
-|-----------------------|--------------------------------------------|-----------------------|-------------------------------------------|------------------------------|
-| `doc_tracker.md`      | `{doc_dir}/` file dependencies            | Doc-to-doc            | `{memory_dir}/`                              | Highest                      |
-| `module_relationship_tracker.md`| Module-level dependencies                | Module-to-module      | `{memory_dir}/`                           | High                         |
-| Mini-Trackers         | Within-module file/function/doc dependencies | File/function/doc-level | `{module_name}_module.md` | Low                     |
+| Tracker                      | Scope                                  | Granularity           | Location                      | Verification Order (Set-up/Maintenance) | Rationale                                      |
+|------------------------------|----------------------------------------|-----------------------|-------------------------------|-----------------------------------------|------------------------------------------------|
+| `doc_tracker.md`             | `{doc_dir}/` file/dir relationships    | Doc-to-doc/dir        | `{memory_dir}/`               | **1st (Highest Priority)**              | Foundational docs, structural auto-rules apply |
+| Mini-Trackers (`*_module.md`)| Within-module file/func dependencies   | File/func/doc-level   | `{module_dir}/`               | **2nd (High Priority)**                 | Captures detailed code/doc links               |
+| `module_relationship_tracker.md`| Module-level dependencies              | Module-to-module      | `{memory_dir}/`               | **3rd (After Minis)**                   | Aggregates/relies on verified mini-tracker info|
+
+*Note on Verification Order*: During Set-up/Maintenance, placeholders **must** be resolved in the order specified above. Mini-tracker details inform the higher-level module relationships.
 
 **Dependency Characters:**
 - `<`: Row **functionally relies on** or requires Column for context/operation.
