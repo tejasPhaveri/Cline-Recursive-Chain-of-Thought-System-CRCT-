@@ -260,14 +260,15 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor remove-key cline_docs/module_relationship_tracker.md 2Aa`
 
 5.  **`show-keys --tracker <tracker_file_path>`**:
-    *   **Purpose**: Displays the key definitions (`key: path`) defined *within* the specified tracker file. Crucially, it also checks the dependency grid *within that same tracker* and appends ` (placeholders present)` to any key whose corresponding row contains unresolved 'p' placeholders. Use this command *only* to identify keys needing investigation via the ` (placeholders present)` indicator. Do not attempt to manually interpret the raw grid. Use `show-dependencies` to view the specific relationships for a key before verification.
+    *   **Purpose**: Displays the key definitions (`key: path`) defined *within* the specified tracker file. Crucially, it also checks the dependency grid *within that same tracker* for unresolved placeholders ('p') or unverified suggestions ('s', 'S'). If any of these characters ('p', 's', 'S') are present in a key's corresponding row, it appends an indicator like ` (checks needed: p, s)` specifying which character(s) require attention. This is the **primary method** for identifying which keys need further investigation using `show-dependencies` during the Set-up/Maintenance phase. Use this command *only* to identify keys needing verification. Do not attempt to manually interpret the raw grid.
     *   **Example**: `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker cline_docs/doc_tracker.md`
     *   **Output Example**:
         ```
         --- Keys Defined in doc_tracker.md ---
         1A1: docs/intro.md
-        1A2: docs/setup.md (placeholders present)
-        2B1: docs/api/users.md
+        1A2: docs/setup.md (checks needed: p, s)
+        2B1: docs/api/users.md (checks needed: S)
+        2B2: docs/api/auth.md
         --- End of Key Definitions ---
         ```
 

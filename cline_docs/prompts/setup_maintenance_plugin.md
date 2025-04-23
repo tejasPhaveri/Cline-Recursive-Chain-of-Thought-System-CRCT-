@@ -75,8 +75,8 @@
 2.  **Identify Keys Needing Verification**:
     *   For each tracker:
         *   Run `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker <tracker_file_path>`
-        *   Examine the output. Identify all lines ending with ` (placeholders present)`. These indicate keys defined *in this tracker* where dependency rows contain unverified 'p' relationships.
-        *   Create a list of these keys (e.g., `['1A2', '3Bc1']`) for the current tracker.
+        *   Examine the output. Identify all lines ending with an indicator like ` (checks needed: ...)`. This indicator specifies which unresolved characters ('p' - placeholder, 's' - weak suggestion, 'S' - strong suggestion) were found in that key's dependency row *within this specific tracker*. Any key with this indicator requires further investigation.
+        *   Create a list of these keys (e.g., `['1A2', '3Bc1']`) for the current tracker that need verification.
 
 3.  **Verify Placeholders ('p') and Suggestions ('s', 'S') for Identified Keys**:
     *   Iterate through the list of keys identified in the previous step for the *current tracker*.
@@ -147,15 +147,15 @@
 ### IV.5 Set-up/Maintenance Dependency Workflow
 ```mermaid
 graph TD
-    A[Start Set-up/Maintenance Verification] --> B(Run analyze-project?);
+    A[Start Set-up/Maintenance] --> B(Run analyze-project?);
     B -- Yes --> C[Execute analyze-project];
     B -- No --> D[Stage 1: Verify doc_tracker.md];
     C --> D;
 
     subgraph Verify_doc_tracker [Stage 1: doc_tracker.md]
-        D1[Use show-keys --tracker doc_tracker.md] --> D2{Placeholders?};
-        D2 -- Yes --> D3[Identify Key];
-        D3 --> D4(Run show-dependencies --key);
+        D1[Use show-keys --tracker doc_tracker.md] --> D2{Checks Needed<br>Indicated?};
+        D2 -- Yes --> D3[Identify Key with<br>'(checks needed: ...)'<br>indicator];
+        D3 --> D4(Run show-dependencies --key [key]);
         D4 --> D5(Plan Reading / Suggest @add folder);
         D5 --> D6(Read Source + Target Files);
         D6 --> D7(Determine Relationships);
@@ -176,9 +176,9 @@ graph TD
         F4 --> F5{Any Mini-Trackers Found?};
         F5 -- Yes --> F6[Select Next Mini-Tracker];
         F6 --> F7[Use show-keys --tracker <mini_tracker>];
-        F7 --> F8{Placeholders?};
+        F7 --> F8{Checks Needed<br>Indicated?};
         F8 -- Yes --> F9[Identify Key];
-        F9 --> F10(Run show-dependencies --key);
+        F9 --> F10(Run show-dependencies --key [key]);
         F10 --> F11(Plan Reading / Suggest @add folder);
         F11 --> F12(Read Source + Target Files);
         F12 --> F13(Determine Relationships);
@@ -196,9 +196,9 @@ graph TD
 
     G --> H[Stage 3: Verify module_relationship_tracker.md];
     subgraph Verify_main_tracker [Stage 3: module_relationship_tracker.md]
-        H1[Use show-keys --tracker module_relationship_tracker.md] --> H2{Placeholders?};
+        H1[Use show-keys --tracker module_relationship_tracker.md] --> H2{Checks Needed<br>Indicated?};
         H2 -- Yes --> H3[Identify Key];
-        H3 --> H4(Run show-dependencies --key);
+        H3 --> H4(Run show-dependencies --key [key]);
         H4 --> H5(Plan Reading / Use Mini-Tracker Context);
         H5 --> H6(Read Source + Target Module Docs);
         H6 --> H7(Determine Relationships);

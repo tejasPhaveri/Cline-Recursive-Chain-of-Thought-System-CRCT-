@@ -421,10 +421,11 @@ def handle_show_keys(args: argparse.Namespace) -> int:
     Handle the show-keys command.
     Displays key definitions from the specified tracker file.
     Additionally, checks if the corresponding row in the grid contains
-    any 'p' (placeholder) characters and indicates this in the output.
+    any 'p', 's', or 'S' characters (indicating unverified placeholders
+    or suggestions) and notes which were found.
     """
     tracker_path = normalize_path(args.tracker)
-    logger.info(f"Attempting to show keys and placeholder status from tracker: {tracker_path}")
+    logger.info(f"Attempting to show keys and check status (p, s, S) from tracker: {tracker_path}")
 
     if not os.path.exists(tracker_path):
         print(f"Error: Tracker file not found: {tracker_path}", file=sys.stderr)
@@ -434,7 +435,6 @@ def handle_show_keys(args: argparse.Namespace) -> int:
     try:
         # Use read_tracker_file to parse keys and grid structure
         tracker_data = read_tracker_file(tracker_path)
-
         if not tracker_data:
             # read_tracker_file already logs errors if parsing fails
             print(f"Error: Could not read or parse tracker file: {tracker_path}", file=sys.stderr)
@@ -458,22 +458,34 @@ def handle_show_keys(args: argparse.Namespace) -> int:
 
         for key_string in sorted_keys:
             file_path = keys_map.get(key_string, "PATH_UNKNOWN")
-            placeholder_indicator = ""
+            check_indicator = "" # Renamed for clarity
 
-            # Check the grid for placeholders *only if* the grid exists
+            # Check the grid for 'p', 's', or 'S' *only if* the grid exists
             if grid_map:
                 compressed_row = grid_map.get(key_string, "")
-                if 'p' in compressed_row:
-                    # Check specifically for 'p' character, not as part of a count like '10p'
-                    # This simple check works because 'p' won't appear in counts (which are digits)
-                    placeholder_indicator = " (placeholders present)"
-                elif not compressed_row:
-                     # Indicate if a key exists but has no corresponding grid row yet
-                     placeholder_indicator = " (grid row missing)"
-                     logger.warning(f"Key '{key_string}' found in definitions but missing from grid in {tracker_path}")
+                if compressed_row: # Check if the row string exists and is not empty
+                    found_chars = []
+                    # Check for each character efficiently using 'in'. This is safe
+                    # as 'p', 's', 'S' won't appear in RLE counts (which are digits).
+                    if 'p' in compressed_row:
+                        found_chars.append('p')
+                    if 's' in compressed_row:
+                        found_chars.append('s')
+                    if 'S' in compressed_row:
+                        found_chars.append('S')
 
+                    if found_chars:
+                        # Sort for consistent output order (e.g., p, s, S)
+                        sorted_chars = sorted(found_chars)
+                        chars_str = ", ".join(sorted_chars)
+                        check_indicator = f" (checks needed: {chars_str})" # Updated indicator format
+                else:
+                    # Indicate if a key exists but has no corresponding grid row yet
+                    check_indicator = " (grid row missing)"
+                    logger.warning(f"Key '{key_string}' found in definitions but missing from grid in {tracker_path}")
 
-            print(f"{key_string}: {file_path}{placeholder_indicator}")
+            # Print the key, path, and the indicator (if any checks are needed or row is missing)
+            print(f"{key_string}: {file_path}{check_indicator}")
 
         print("--- End of Key Definitions ---")
 
@@ -583,7 +595,7 @@ def main():
     show_deps_parser.set_defaults(func=handle_show_dependencies)
 
     # --- Show Keys Command ---
-    show_keys_parser = subparsers.add_parser("show-keys", help="Show key definitions from a tracker, indicating placeholders")
+    show_keys_parser = subparsers.add_parser("show-keys", help="Show keys from tracker, indicating if checks needed (p, s, S)")
     show_keys_parser.add_argument("--tracker", required=True, help="Path to the tracker file (.md)")
     show_keys_parser.set_defaults(func=handle_show_keys)
 
