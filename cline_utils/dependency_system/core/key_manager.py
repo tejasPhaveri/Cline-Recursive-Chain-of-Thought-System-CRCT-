@@ -1,12 +1,16 @@
+# key_manager.py
+
 """
 Core module for key management.
 Handles key generation, validation, and sorting based on a hierarchical,
 contextual model with tier promotion for nested subdirectories.
+Persists the global key map to a file.
 """
 
 import glob
 import os
 import re
+import json # Added for saving/loading map
 from typing import Dict, List, Tuple, Optional, Set, NamedTuple
 from collections import defaultdict
 
@@ -14,18 +18,18 @@ from collections import defaultdict
 try:
     from cline_utils.dependency_system.utils.path_utils import get_project_root, normalize_path
     from cline_utils.dependency_system.utils.config_manager import ConfigManager
-    # Assuming constants like PLACEHOLDER_CHAR etc. are defined elsewhere if needed by helpers
+
 except ImportError:
     # Handle potential path issues if run standalone or structure changes
     # This might require adjusting sys.path or using relative imports carefully
     print("Warning: Potential import errors. Ensure cline_utils is in the Python path.")
-    # Define dummy functions/classes if needed for basic loading, but functionality will fail
     def normalize_path(p): return os.path.normpath(p).replace("\\", "/")
     def get_project_root(): return os.getcwd()
     class ConfigManager:
         def get_excluded_dirs(self): return set()
         def get_excluded_extensions(self): return set()
         def get_excluded_paths(self): return []
+        def get_excluded_file_patterns(self): return []
 
 import logging
 logger = logging.getLogger(__name__)
@@ -40,6 +44,7 @@ ASCII_Z_LOWER = 122 # ASCII value for 'z'
 HIERARCHICAL_KEY_PATTERN = r'^[1-9]\d*[A-Z](?:[a-z](?:[1-9]\d*)?|[1-9]\d*)?$'
 # Pattern for splitting keys into sortable parts (numbers and non-numbers)
 KEY_PATTERN = r'\d+|\D+'
+GLOBAL_KEY_MAP_FILENAME = "global_key_map.json" # Define filename constant
 
 class KeyGenerationError(ValueError):
     """Custom exception for key generation failures."""
@@ -88,11 +93,13 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
     """
     Generate hierarchical, contextual keys for files and directories.
     Implements tier promotion for nested subdirectories.
+    Saves the resulting key map to a file alongside this script.
+    Uses ConfigManager for default exclusions if specific arguments are not provided.
 
     Args:
         root_paths: List of root directory paths to process.
-        excluded_dirs: Optional set of directory names to exclude.
-        excluded_extensions: Optional set of file extensions to exclude.
+        excluded_dirs: Optional set of directory names to exclude. If None, uses config.
+        excluded_extensions: Optional set of file extensions to exclude. If None, uses config.
         precomputed_excluded_paths: Optional set of pre-calculated absolute paths to exclude.
 
     Returns:
@@ -365,10 +372,76 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
     # Ensure the returned list contains unique KeyInfo objects (in case of reprocessing/overlaps)
     # Using dict.fromkeys preserves order (Python 3.7+) and ensures uniqueness based on KeyInfo equality
     # Note: KeyInfo is a tuple, so equality works as expected.
-    unique_new_keys = list(dict.fromkeys(newly_generated_keys).keys())
+    # --- Save the generated map ---
+    try:
+        # Get the directory where this script (key_manager.py) resides
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        map_path = normalize_path(os.path.join(script_dir, GLOBAL_KEY_MAP_FILENAME))
 
+        # Ensure the directory exists (should always be true for script's own dir)
+        os.makedirs(script_dir, exist_ok=True)
+
+        # Convert KeyInfo tuples to dictionaries for JSON serialization
+        serializable_map = {path: info._asdict() for path, info in path_to_key_info.items()}
+
+        with open(map_path, 'w', encoding='utf-8') as f:
+            json.dump(serializable_map, f, indent=2)
+        logger.info(f"Successfully saved global key map to: {map_path}")
+    except IOError as e:
+        logger.error(f"I/O Error saving global key map to {map_path}: {e}", exc_info=True)
+        # Decide if this should be a critical failure or just a warning
+        raise KeyGenerationError(f"Failed to save global key map: {e}") from e
+    except Exception as e:
+        logger.exception(f"Unexpected error saving global key map to {map_path}: {e}")
+        raise KeyGenerationError(f"Failed to save global key map: {e}") from e
+
+    unique_new_keys = list(dict.fromkeys(newly_generated_keys).keys())
     return path_to_key_info, unique_new_keys
 
+def load_global_key_map() -> Optional[Dict[str, KeyInfo]]:
+    """
+    Loads the persisted global path_to_key_info map from the JSON file
+    located alongside key_manager.py.
+
+    Returns:
+        The loaded dictionary mapping normalized paths to KeyInfo objects,
+        or None if the file doesn't exist or fails to load/parse.
+    """
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        map_path = normalize_path(os.path.join(script_dir, GLOBAL_KEY_MAP_FILENAME))
+
+        if not os.path.exists(map_path):
+            logger.error(f"Global key map file not found at {map_path}. Run project analysis ('analyze-project') first.")
+            return None
+
+        with open(map_path, 'r', encoding='utf-8') as f:
+            loaded_data = json.load(f)
+
+        # Convert dictionary data back into KeyInfo objects
+        path_to_key_info: Dict[str, KeyInfo] = {}
+        for path, info_dict in loaded_data.items():
+            try:
+                # Ensure all expected fields are present before unpacking
+                # (Could add more robust validation if needed)
+                path_to_key_info[path] = KeyInfo(**info_dict)
+            except TypeError as te:
+                logger.error(f"Error converting loaded data to KeyInfo for path '{path}'. Data: {info_dict}. Error: {te}")
+                # Skip this entry or return None entirely? For now, skip.
+                continue # Skip this entry
+
+        logger.info(f"Successfully loaded global key map ({len(path_to_key_info)} entries) from: {map_path}")
+        return path_to_key_info
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON from global key map file {map_path}: {e}", exc_info=True)
+        return None
+    except IOError as e:
+        logger.error(f"I/O Error loading global key map file {map_path}: {e}", exc_info=True)
+        return None
+    except Exception as e:
+        logger.exception(f"Unexpected error loading global key map from {map_path}: {e}")
+        return None
 
 def validate_key(key: str) -> bool:
     """

@@ -254,6 +254,14 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
     *(Note: This command applies the *single* `--dep-type` to *all* specified target keys relative to the source key.)*
     *(Efficiency Tip: When verifying dependencies for a single source key, group multiple target keys that require the *same* dependency type into one command execution using multiple `--target-key` arguments.)*
     *   *(Recommendation: Specify no more than five target keys at once for clarity.)*
+    *   **Foreign Key Addition in Mini-Trackers** (add-dependency Enhancement):
+        - Capability: When using the add-dependency command specifically targeting a mini-tracker file (*_module.md), you can now specify a --target-key that does not currently exist within that mini-tracker's local key definitions, as long as the target key is valid globally (i.e., it exists in the persisted core/global_key_map.json).
+        - Mechanism: The system will automatically:
+            - Validate the foreign target key against the global map.
+            - Add the foreign key's definition (key: path) to the mini-tracker's key list.
+            - Rebuild the mini-tracker's grid structure to include the new key.
+            - Set the specified dependency between the --source-key (which must be internal to the mini-tracker) and the newly added foreign --target-key.
+        - Use Case: This is primarily for manually establishing dependencies for code that might be in progress or dependencies missed by the automated analyze-project suggestions. You no longer need analyze-project to pull in a foreign key before you can manually set its relationship in a mini-tracker.
 
 4.  **`remove-key <tracker_file> <key>`**:
     *   **Purpose**: Removes a key and its corresponding row/column definition entirely from the specified `<tracker_file>`. Use when deleting or refactoring files/concepts associated with the key *out of that tracker's scope*. Note: This only affects the specified tracker. Run `analyze-project` afterwards to ensure consistency across all trackers if the underlying file/concept is truly gone.

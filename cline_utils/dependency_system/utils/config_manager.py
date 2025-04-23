@@ -101,11 +101,9 @@ DEFAULT_CONFIG = {
         "doc_model_name": "all-mpnet-base-v2",
         "code_model_name": "all-mpnet-base-v2",
     },
-    # --- Add this section ---
     "compute": {
         "embedding_device": "auto"  # Options: "auto", "cuda", "mps", "cpu"
     },
-    # --- End Add ---
     "paths": {
         "doc_dir": "docs",
         "memory_dir": "cline_docs",
@@ -117,11 +115,11 @@ DEFAULT_CONFIG = {
         "src/client/node_modules"
     ],
     "allowed_dependency_chars": ['<', '>', 'x', 'd', 's', 'S'],
-    "excluded_file_patterns": [ # <-- ADDED SECTION
+    "excluded_file_patterns": [
         "*_module.md",
         "implementation_plan_*.md",
         "*_task.md" # Future task file pattern (to be confirmed)
-    ]              # <-- END ADDED SECTION
+    ]              
 }
 
 # Define character priorities (Higher number = higher priority) - Centralized definition
