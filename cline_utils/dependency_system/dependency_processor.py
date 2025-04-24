@@ -150,7 +150,10 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
     dep_type = args.dep_type
     # Dependency type validation
     ALLOWED_DEP_TYPES = {'<', '>', 'x', 'd', 'o', 'n', 'p', 's', 'S'}
+
     logger.info(f"Attempting to add dependency: {source_key} -> {target_keys} ({dep_type}) in tracker {tracker_path}")
+
+    # --- Basic Validation ---
     if dep_type not in ALLOWED_DEP_TYPES:
         print(f"Error: Invalid dep type '{dep_type}'. Allowed: {', '.join(sorted(list(ALLOWED_DEP_TYPES)))}")
         return 1
@@ -159,13 +162,23 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
     tracker_data = read_tracker_file(tracker_path)
     if not tracker_data or not tracker_data.get("keys"):
         print(f"Error: Could not read tracker or no keys found: {tracker_path}")
-        return 1
-    local_keys = tracker_data["keys"] # key_string -> path_string map
-    local_grid = tracker_data.get("grid", {})
-    local_sorted_keys = sort_key_strings_hierarchically(list(local_keys.keys()))
+        # If it's a mini-tracker that doesn't exist yet, update_tracker might handle creation
+        if not is_mini_tracker:
+            return 1
+        else:
+            logger.warning(f"Mini-tracker {tracker_path} not found or invalid, proceeding to update_tracker for potential creation.")
+            # Allow proceeding, update_tracker handles creation
+            local_keys = {}
+            local_grid = {}
+            local_sorted_keys = []
+    else:
+        local_keys = tracker_data["keys"] # key_string -> path_string map
+        local_grid = tracker_data.get("grid", {})
+        local_sorted_keys = sort_key_strings_hierarchically(list(local_keys.keys()))
 
-    # --- Validate Source Key Locally ---
-    if source_key not in local_keys:
+
+    # --- Validate Source Key Locally (if tracker exists) ---
+    if local_keys and source_key not in local_keys:
         print(f"Error: Source key '{source_key}' not found in tracker '{tracker_path}'.")
         return 1
 
@@ -187,18 +200,11 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
         elif is_mini_tracker:
             # Target missing locally, BUT it's a mini-tracker - check globally
             logger.debug(f"Target '{target_key}' not found locally in mini-tracker. Checking globally...")
-
-            # Load global map ONCE if needed
             if not global_map_loaded:
                 global_path_to_key_info = load_global_key_map()
-                if global_path_to_key_info is None:
-                    print("Error: Global key map required for foreign key validation but not found. Run 'analyze-project' first.")
-                    return 1 # Cannot proceed without global map
+                if global_path_to_key_info is None: print("Error: Global key map required but not found. Run 'analyze-project'."); return 1
                 global_map_loaded = True
-
-            # Validate target key exists globally
             target_exists_globally = any(info.key_string == target_key for info in global_path_to_key_info.values())
-
             if target_exists_globally:
                 foreign_adds.append((target_key, dep_type))
                 logger.info(f"Target '{target_key}' is valid globally. Queued for foreign key addition.")
@@ -212,14 +218,21 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
             return 1 # Stop on first invalid target key
 
     # --- Execute Changes ---
-    if foreign_adds:
-        # --- Call update_tracker for mini-tracker with foreign keys ---
-        logger.info(f"Updating mini-tracker '{tracker_path}' to include foreign keys: {[t for t, _ in foreign_adds]}")
+    # <<< MODIFICATION START >>>
+    # Always use update_tracker for mini-trackers to ensure content preservation
+    if is_mini_tracker:
+        if not internal_changes and not foreign_adds:
+             print("No valid dependencies specified or identified.")
+             return 0
 
-        # 1. Need to generate file_to_module map from the global map
-        if not global_path_to_key_info: # Should have been loaded above
-             print("Error: Internal state error - global map missing.")
-             return 1
+        logger.info(f"Updating mini-tracker '{tracker_path}' via update_tracker...")
+
+        # Ensure global map is loaded (might only have internal changes)
+        if not global_map_loaded:
+            global_path_to_key_info = load_global_key_map()
+            if global_path_to_key_info is None: print("Error: Global key map required but not found. Run 'analyze-project'."); return 1
+            # global_map_loaded = True # Not strictly needed anymore
+
 
         file_to_module_map: Dict[str, str] = {}
         for key_info in global_path_to_key_info.values():
@@ -230,7 +243,16 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
         # Note: We pass the intended dep_type directly. update_tracker will use priority
         # if conflicts arise with existing data, but for new relationships, this should work.
         all_targets_for_source = internal_changes + foreign_adds
-        suggestions_for_update = {source_key: all_targets_for_source}
+        # Check if source key exists before creating suggestions map
+        # update_tracker might handle a missing source if creating, but add-dependency assumes source exists
+        if not local_keys and not foreign_adds: # If tracker didn't exist and only internal changes specified (impossible state?)
+            print(f"Error: Cannot add internal dependency for source '{source_key}' as tracker doesn't exist.")
+            return 1
+        elif source_key not in local_keys and not foreign_adds: # Source key invalid locally, no foreign adds
+             print(f"Error: Source key '{source_key}' not found in existing tracker.")
+             return 1
+
+        suggestions_for_update = {source_key: all_targets_for_source} if all_targets_for_source else {}
 
         # 3. Call update_tracker
         try:
