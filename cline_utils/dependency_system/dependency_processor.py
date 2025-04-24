@@ -217,150 +217,44 @@ def handle_add_dependency(args: argparse.Namespace) -> int:
             print(f"Error: Target key '{target_key}' not found in tracker '{tracker_path}'.")
             return 1 # Stop on first invalid target key
 
-    # --- Execute Changes ---
-    # <<< MODIFICATION START >>>
-    # Always use update_tracker for mini-trackers to ensure content preservation
-    if is_mini_tracker:
-        if not internal_changes and not foreign_adds:
-             print("No valid dependencies specified or identified.")
-             return 0
+    # --- Combine all changes ---
+    all_targets_for_source = internal_changes + foreign_adds
+    if not all_targets_for_source:
+        print("No valid dependencies specified or identified."); return 0
 
-        logger.info(f"Updating mini-tracker '{tracker_path}' via update_tracker...")
+    # --- Prepare data for update_tracker ---
+    suggestions_for_update = {source_key: all_targets_for_source}
+    force_apply = True # Always force apply from add-dependency
 
-        # Ensure global map is loaded (might only have internal changes)
-        if not global_map_loaded:
-            global_path_to_key_info = load_global_key_map()
-            if global_path_to_key_info is None: print("Error: Global key map required but not found. Run 'analyze-project'."); return 1
-            # global_map_loaded = True # Not strictly needed anymore
+    # Load global map if not already loaded (needed for file_to_module)
+    if not global_map_loaded:
+        global_path_to_key_info = load_global_key_map()
+        if global_path_to_key_info is None: print("Error: Global map needed."); return 1
 
+    # Generate file_to_module map (needed by update_tracker even if no foreign keys added this time)
+    file_to_module_map = {info.norm_path: info.parent_path for info in global_path_to_key_info.values() if not info.is_directory and info.parent_path}
 
-        file_to_module_map: Dict[str, str] = {}
-        for key_info in global_path_to_key_info.values():
-            if not key_info.is_directory and key_info.parent_path:
-                file_to_module_map[key_info.norm_path] = key_info.parent_path
-
-        # 2. Synthesize suggestions: Combine internal and foreign adds for the source key
-        # Note: We pass the intended dep_type directly. update_tracker will use priority
-        # if conflicts arise with existing data, but for new relationships, this should work.
-        all_targets_for_source = internal_changes + foreign_adds
-        # Check if source key exists before creating suggestions map
-        # update_tracker might handle a missing source if creating, but add-dependency assumes source exists
-        if not local_keys and not foreign_adds: # If tracker didn't exist and only internal changes specified (impossible state?)
-            print(f"Error: Cannot add internal dependency for source '{source_key}' as tracker doesn't exist.")
-            return 1
-        elif source_key not in local_keys and not foreign_adds: # Source key invalid locally, no foreign adds
-             print(f"Error: Source key '{source_key}' not found in existing tracker.")
-             return 1
-
-        suggestions_for_update = {source_key: all_targets_for_source} if all_targets_for_source else {}
-
-        # 3. Call update_tracker
-        try:
-            update_tracker(
-                output_file_suggestion=tracker_path, # Provide path for context
-                path_to_key_info=global_path_to_key_info, # Pass the loaded global map
-                tracker_type="mini",
-                suggestions=suggestions_for_update, # Pass the dependencies we want to set
-                file_to_module=file_to_module_map, # Pass the generated map
-                new_keys=None # We aren't generating globally new keys here
-            )
-            # update_tracker handles writing and invalidating caches
-            print(f"Successfully updated mini-tracker {tracker_path} with dependencies (including foreign).")
-            # Note: Reciprocal handling for '<'/' >' is now managed by update_tracker's suggestion logic (priority-based).
-            # If strict reciprocal addition is needed for manual foreign adds, further logic might be required.
-            return 0
-        except Exception as e:
-            logger.error(f"Error updating mini-tracker via update_tracker: {e}", exc_info=True)
-            print(f"Error updating tracker {tracker_path}: {e}")
-            return 1
-
-    elif internal_changes:
-        logger.info(f"Applying internal-only dependency changes to {tracker_path}...")
-        grid_changed = False
-        current_grid = local_grid.copy() # Work on a copy
-        reciprocal_changes = [] # List to store reciprocal change descriptions
-
-        for target_key, dep_type_internal in internal_changes:
-            try:
-                # Add dependency from source to current target
-                new_grid_after_add = add_dependency_to_grid(current_grid, source_key, target_key, local_sorted_keys, dep_type_internal)
-                if new_grid_after_add != current_grid:
-                    current_grid = new_grid_after_add
-                    grid_changed = True
-
-                # Add reciprocal dependency if type is '<' or '>'
-                reciprocal_char = None
-                if dep_type_internal == '>':
-                    reciprocal_char = '<'
-                elif dep_type_internal == '<':
-                    reciprocal_char = '>'
-
-                if reciprocal_char:
-                    source_key_index = local_sorted_keys.index(source_key)
-                    # Check existing char in target's row for source column
-                    target_row_compressed = current_grid.get(target_key, "")
-                    existing_reciprocal_char = PLACEHOLDER_CHAR # Default if row missing or char invalid
-                    try:
-                        if target_row_compressed: existing_reciprocal_char = get_char_at(target_row_compressed, source_key_index)
-                    except IndexError: pass # Ignore if index out of bounds
-
-                    # Check for 'x' upgrade condition
-                    upgrade_to_mutual = False
-                    if (reciprocal_char == '<' and existing_reciprocal_char == '>') or \
-                       (reciprocal_char == '>' and existing_reciprocal_char == '<'):
-                        upgrade_to_mutual = True
-
-                    if upgrade_to_mutual:
-                        # Apply 'x' from target -> source
-                        new_grid_after_recip = add_dependency_to_grid(current_grid, target_key, source_key, local_sorted_keys, 'x')
-                        if new_grid_after_recip != current_grid:
-                            current_grid = new_grid_after_recip; grid_changed = True
-                            logger.debug(f"Upgraded reciprocal {target_key} -> {source_key} to 'x'")
-                        # Ensure original source -> target is also 'x'
-                        new_grid_after_recip_orig = add_dependency_to_grid(current_grid, source_key, target_key, local_sorted_keys, 'x')
-                        if new_grid_after_recip_orig != current_grid:
-                             current_grid = new_grid_after_recip_orig; grid_changed = True
-                             logger.debug(f"Upgraded original {source_key} -> {target_key} to 'x'")
-                    else:
-                        # Apply simple reciprocal
-                        new_grid_after_recip = add_dependency_to_grid(current_grid, target_key, source_key, local_sorted_keys, reciprocal_char)
-                        if new_grid_after_recip != current_grid:
-                            current_grid = new_grid_after_recip; grid_changed = True
-                            logger.debug(f"Added reciprocal {target_key} -> {source_key} ('{reciprocal_char}')")
-
-            except ValueError as ve:
-                print(f"Error processing internal change {source_key} -> {target_key}: {ve}")
-                return 1 # Exit on first error
-
-        if not grid_changed:
-            print("No changes made to the grid.")
-            return 0
-        
-        # Write changes using write_tracker_file
-        last_edit_message = f"Manual add dependency {source_key} -> {[t for t, _ in internal_changes]} ({dep_type})"
-
-        if reciprocal_changes:
-            last_edit_message += " and reciprocal: " + ", ".join(reciprocal_changes)
-
-        tracker_data["last_grid_edit"] = last_edit_message
-
-        success = write_tracker_file(
-            tracker_path,
-            local_keys,
-            current_grid,
-            tracker_data.get("last_key_edit", ""),
-            tracker_data["last_grid_edit"]
+    # --- Call update_tracker for ALL cases (mini, main, doc) ---
+    # Let update_tracker handle type determination, reading, writing, content preservation
+    try:
+        logger.info(f"Calling update_tracker for {tracker_path} (Force Apply: {force_apply})")
+        update_tracker(
+            output_file_suggestion=tracker_path, # Pass path for context/determination
+            path_to_key_info=global_path_to_key_info,
+            # <<< Determine tracker_type based on path >>>
+            tracker_type="mini" if is_mini_tracker else ("doc" if "doc_tracker.md" in tracker_path else "main"),
+            suggestions=suggestions_for_update,
+            file_to_module=file_to_module_map,
+            new_keys=None, # add-dependency doesn't introduce globally new keys
+            # <<< PASS THE FLAG >>>
+            force_apply_suggestions=force_apply
         )
-        if success:
-            print(f"Added internal dependencies from {source_key} -> {[t for t, _ in internal_changes]} ({dep_type}) in {tracker_path}")
-            return 0
-        else:
-            print(f"Error: Failed write to {tracker_path}")
-            return 1
-    else:
-        # No internal or foreign changes requested/valid
-        print("No valid dependencies specified or identified.")
+        print(f"Successfully updated tracker {tracker_path} with dependencies.")
         return 0
+    except Exception as e:
+        logger.error(f"Error calling update_tracker for {tracker_path}: {e}", exc_info=True)
+        print(f"Error updating tracker {tracker_path}: {e}")
+        return 1
 
 def handle_merge_trackers(args: argparse.Namespace) -> int:
     """Handle the merge-trackers command."""

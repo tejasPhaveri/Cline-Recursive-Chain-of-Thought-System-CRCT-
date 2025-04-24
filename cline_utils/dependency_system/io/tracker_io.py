@@ -517,7 +517,10 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                    tracker_type: str = "main",
                    suggestions: Optional[Dict[str, List[Tuple[str, str]]]] = None, # Key STRINGS -> (Key STRING, char)
                    file_to_module: Optional[Dict[str, str]] = None, # norm_file_path -> norm_module_path
-                   new_keys: Optional[List[KeyInfo]] = None): # GLOBAL list of new KeyInfo objects
+                   new_keys: Optional[List[KeyInfo]] = None, # GLOBAL list of new KeyInfo objects
+                   # <<< ADD NEW FLAG >>>
+                   force_apply_suggestions: bool = False
+                  ):
     """
     Updates or creates a tracker file based on type using contextual keys.
     Invalidates cache on changes.
@@ -989,50 +992,92 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                 logger.warning(f"Grid Rebuild: Error processing row '{old_row_key}' in {output_file}: {e}. Skipping copy.", exc_info=False) # Less verbose exc_info
 
     # --- Apply Suggestions (Filtered or Aggregated) ---
-    suggestion_applied = False
-    if final_suggestions_to_apply: # Uses the correctly determined suggestions for this tracker type
-        logger.debug(f"Applying {sum(len(v) for v in final_suggestions_to_apply.values())} suggestions to grid for {output_file}")
+    suggestion_applied = False # Flag to track if grid content actually changed
+    applied_manual_source = None # Track source key for manual message
+    applied_manual_targets = [] # Track target keys for manual message
+    applied_manual_dep_type = None # Track dep type for manual message
+
+    if final_suggestions_to_apply:
+        logger.debug(f"Applying {sum(len(v) for v in final_suggestions_to_apply.values())} suggestions to grid for {output_file} (Force Apply: {force_apply_suggestions})") # Log force flag
         for row_key, deps in final_suggestions_to_apply.items():
             if row_key not in final_key_to_idx: continue
             current_decomp_row = temp_decomp_grid.get(row_key)
             if not current_decomp_row: continue
+
             for col_key, dep_char in deps: # dep_char is the SUGGESTED character
                 if col_key not in final_key_to_idx: continue
                 if row_key == col_key: continue
-                col_idx = final_key_to_idx[col_key]; existing_char = current_decomp_row[col_idx]
-                if existing_char == PLACEHOLDER_CHAR and dep_char != PLACEHOLDER_CHAR:
-                    current_decomp_row[col_idx] = dep_char
-                    if not suggestion_applied: final_last_grid_edit = f"Applied suggestions ({datetime.datetime.now().isoformat()})"
-                    suggestion_applied = True
-                    logger.debug(f"Applied suggestion: {row_key} -> {col_key} ({dep_char}) in {output_file}")
 
-                # Handle conflicts ONLY if suggestion wasn't applied (i.e., existing_char != 'p')
-                # and the suggestion is different from the existing char
-                elif existing_char != PLACEHOLDER_CHAR and existing_char != DIAGONAL_CHAR and existing_char != dep_char:
-                    # --- Refined Warning Logic ---
-                    try:
-                        existing_priority = get_priority(existing_char)
-                        suggestion_priority = get_priority(dep_char)
+                col_idx = final_key_to_idx[col_key]
+                existing_char = current_decomp_row[col_idx] # Character already in the grid
 
-                        # Only warn if the suggestion is STRONGER (higher priority number)
-                        # than the existing character, AND the existing character is NOT 'n'.
-                        # 'n' represents a manual override that suggestions should never overwrite or warn about.
-                        if existing_char != 'n' and suggestion_priority > existing_priority:
-                            # Example scenario: existing='s' (low priority), suggestion='S' (higher priority) -> WARN
-                            warning_msg = (f"Suggestion Conflict in {os.path.basename(output_file)}: For {row_key}->{col_key}, "
-                                           f"grid has '{existing_char}' (prio {existing_priority}), suggestion is '{dep_char}' (prio {suggestion_priority}). Grid value kept.")
-                            logger.warning(warning_msg)
-                        # else: # Optionally log non-warnings at DEBUG level
-                            # logger.debug(f"Suggestion Ignored (No Warn): {row_key}->{col_key}, grid='{existing_char}', sugg='{dep_char}'")
+                applied_this_iter = False # Track if this specific suggestion caused a change
+                if force_apply_suggestions:
+                    # Directly apply the dependency if forcing, unless suggestion is placeholder
+                    if dep_char != PLACEHOLDER_CHAR:
+                        if existing_char != dep_char: # Only apply if change needed
+                            logger.debug(f"Force applying suggestion: {row_key} -> {col_key} ('{dep_char}') over existing ('{existing_char}')")
+                            current_decomp_row[col_idx] = dep_char
+                            suggestion_applied = True # Mark grid as changed
+                            applied_this_iter = True
+                        # else: logger.debug(f"Force apply: No change needed for {row_key} -> {col_key} ('{dep_char}')")
+                else:
 
-                    except KeyError as e:
-                        # Handle case where a character might not be in the priority map
-                        logger.error(f"Character priority lookup failed for '{str(e)}' during suggestion conflict check. Grid value kept.")
-                    except Exception as e:
-                        logger.error(f"Error during suggestion priority check: {e}. Grid value kept.")
+                    if existing_char == PLACEHOLDER_CHAR and dep_char != PLACEHOLDER_CHAR:
+                        current_decomp_row[col_idx] = dep_char
+                        suggestion_applied = True
+                        applied_this_iter = True
+                        logger.debug(f"Applied suggestion: {row_key} -> {col_key} ({dep_char}) in {output_file}")
+
+                    # Handle conflicts ONLY if suggestion wasn't applied (i.e., existing_char != 'p')
+                    # and the suggestion is different from the existing char
+                    elif existing_char != PLACEHOLDER_CHAR and existing_char != DIAGONAL_CHAR and existing_char != dep_char:
+                        # --- Refined Warning Logic ---
+                        try:
+                            existing_priority = get_priority(existing_char)
+                            suggestion_priority = get_priority(dep_char)
+
+                            # Only warn if the suggestion is STRONGER (higher priority number)
+                            # than the existing character, AND the existing character is NOT 'n'.
+                            # 'n' represents a manual override that suggestions should never overwrite or warn about.
+                            if existing_char != 'n' and suggestion_priority > existing_priority:
+                                # Example scenario: existing='s' (low priority), suggestion='S' (higher priority) -> WARN
+                                warning_msg = (f"Suggestion Conflict in {os.path.basename(output_file)}: For {row_key}->{col_key}, "
+                                               f"grid has '{existing_char}' (prio {existing_priority}), suggestion is '{dep_char}' (prio {suggestion_priority}). Grid value kept.")
+                                logger.warning(warning_msg)
+                            # else: # Optionally log non-warnings at DEBUG level
+                                # logger.debug(f"Suggestion Ignored (No Warn): {row_key}->{col_key}, grid='{existing_char}', sugg='{dep_char}'")
+
+                        except KeyError as e:
+                            # Handle case where a character might not be in the priority map
+                            logger.error(f"Character priority lookup failed for '{str(e)}' during suggestion conflict check. Grid value kept.")
+                        except Exception as e:
+                            logger.error(f"Error during suggestion priority check: {e}. Grid value kept.")
+                
+                # <<< Store details if force applying and a change occurred >>>
+                if force_apply_suggestions and applied_this_iter:
+                    if applied_manual_source is None:
+                        applied_manual_source = row_key
+                    # Basic check: add-dependency sends one source, one type. More complex scenarios might need refinement.
+                    elif applied_manual_source != row_key:
+                         logger.warning("Detected multiple source keys during forced apply; message might be simplified.")
+                    applied_manual_targets.append(col_key)
+                    if applied_manual_dep_type is None:
+                        applied_manual_dep_type = dep_char
+                    elif applied_manual_dep_type != dep_char:
+                         logger.warning("Detected multiple dep types during forced apply; message might be simplified.")
 
             temp_decomp_grid[row_key] = current_decomp_row # Update the row in the temp grid
 
+
+    # --- Update Grid Edit Timestamp if changes were applied ---
+    if suggestion_applied:
+        if force_apply_suggestions and applied_manual_source and applied_manual_targets and applied_manual_dep_type:
+            sorted_targets = sort_key_strings_hierarchically(applied_manual_targets)
+            final_last_grid_edit = f"Manual dependency update {applied_manual_source} -> {sorted_targets} ({applied_manual_dep_type}) ({datetime.datetime.now().isoformat()})" # More specific message
+        else:
+            final_last_grid_edit = f"Applied suggestions ({datetime.datetime.now().isoformat()})"
+    # else: final_last_grid_edit remains unchanged (from read or structure update)
 
     # Compress the final grid state
     final_grid = {key: compress("".join(row_list)) for key, row_list in temp_decomp_grid.items()}
