@@ -795,18 +795,46 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
         # This replaces the previous "foreign only" filtering.
         if raw_suggestions and file_to_module:
             logger.debug(f"Filtering mini-tracker suggestions for application ({os.path.basename(output_file)})...")
+            # final_suggestions_to_apply initialized earlier
             for src_key_str, deps in raw_suggestions.items():
-                if src_key_str not in internal_keys_set: continue
-                src_path = final_key_defs_internal.get(src_key_str)
-                if not src_path or src_path in all_excluded_abs: continue
-                for target_key_str, dep_char in deps:
-                    if target_key_str not in relevant_keys_for_grid: continue
-                    if src_key_str == target_key_str or dep_char == PLACEHOLDER_CHAR: continue
-                    target_info = next((info for info in path_to_key_info.values() if info.key_string == target_key_str), None)
-                    if not target_info: final_suggestions_to_apply[src_key_str].append((target_key_str, dep_char)); continue # Cannot check exclusion
-                    target_path = target_info.norm_path
-                    if target_path in all_excluded_abs: continue
-                    final_suggestions_to_apply[src_key_str].append((target_key_str, dep_char))
+                 # --- REMOVE THIS LINE ---
+                 # if src_key_str not in internal_keys_set: continue
+                 # --- REMOVE THIS LINE ---
+
+                 # Need to get source path info regardless of internal/external for exclusion check
+                 source_info = next((info for info in path_to_key_info.values() if info.key_string == src_key_str), None)
+                 src_path = source_info.norm_path if source_info else None
+
+                 # Skip if source is excluded (check even if source is foreign)
+                 if not src_path or src_path in all_excluded_abs:
+                     # logger.debug(f"Mini filter: Skipping excluded source {src_key_str}")
+                     continue
+                 for target_key_str, dep_char in deps:
+                     # Only consider suggestions WHERE THE TARGET is relevant for this tracker's grid
+                     if target_key_str not in relevant_keys_for_grid:
+                         # logger.debug(f"Mini filter: Skipping target {target_key_str} not relevant for grid.")
+                         continue
+                     # Ignore self-dependencies or placeholder suggestions during application
+                     if src_key_str == target_key_str or dep_char == PLACEHOLDER_CHAR:
+                         continue
+
+                     # Find path/info for target key string from GLOBAL map to check exclusion
+                     target_info = next((info for info in path_to_key_info.values() if info.key_string == target_key_str), None)
+                     if not target_info:
+                         logger.warning(f"Mini filter: No path info for target key {target_key_str}. Cannot check exclusion. Adding suggestion.")
+                         final_suggestions_to_apply[src_key_str].append((target_key_str, dep_char))
+                         continue
+
+                     target_path = target_info.norm_path
+                     # Skip if the target is excluded
+                     if target_path in all_excluded_abs:
+                         # logger.debug(f"Mini filter: Skipping excluded target {target_key_str} ({target_path})")
+                         continue
+
+                     # If source isn't excluded, and target is relevant & non-excluded, add the suggestion.
+                     # logger.debug(f"Mini filter: Adding suggestion {src_key_str} -> {target_key_str} ('{dep_char}')")
+                     final_suggestions_to_apply[src_key_str].append((target_key_str, dep_char)) # Add directly
+
 
     else:
         raise ValueError(f"Unknown tracker type: {tracker_type}")
