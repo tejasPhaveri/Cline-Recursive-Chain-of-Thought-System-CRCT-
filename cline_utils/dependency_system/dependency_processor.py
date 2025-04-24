@@ -307,40 +307,23 @@ def handle_reset_config(args: argparse.Namespace) -> int:
         else: print("Error: Failed reset config."); return 1
     except Exception as e: logger.exception(f"Error reset_config: {e}"); print(f"Error: {e}"); return 1
 
-# <<< *** MODIFIED COMMAND HANDLER *** >>>
 def handle_show_dependencies(args: argparse.Namespace) -> int:
     """Handle the show-dependencies command using the contextual key system."""
     target_key_str = args.key
     logger.info(f"Showing dependencies for key string: {target_key_str}")
 
-    # 1. Generate the global path_to_key_info map
-    config = ConfigManager()
-    project_root = get_project_root()
-    path_to_key_info: Dict[str, KeyInfo] = {}
-    try:
-        logger.info("Generating global key map for context...")
-        # Use settings from config for generation
-        code_roots_rel = config.get_code_root_directories()
-        doc_roots_rel = config.get_doc_directories()
-        all_roots_rel = sorted(list(set(code_roots_rel + doc_roots_rel)))
-        excluded_paths_abs = set(config.get_excluded_paths()) # get_excluded_paths returns absolute paths now
-        excluded_dirs_rel = config.get_excluded_dirs()
-        excluded_extensions = set(config.get_excluded_extensions())
+    # 1. Load the global path_to_key_info map
+    logger.info("Loading global key map...")
+    path_to_key_info = load_global_key_map()
 
-        path_to_key_info, _ = generate_keys(
-            all_roots_rel,
-            excluded_dirs=excluded_dirs_rel,
-            excluded_extensions=excluded_extensions,
-            precomputed_excluded_paths=excluded_paths_abs
-        )
-        if not path_to_key_info:
-             print("Error: Key generation resulted in an empty map. Cannot show dependencies.")
-             return 1
-        logger.info("Global key map generated.")
-    except KeyGenerationError as kge:
-        print(f"Error generating keys: {kge}"); logger.error(f"Key generation failed: {kge}"); return 1
-    except Exception as e:
-        print(f"Error during key generation: {e}"); logger.exception("Key generation failed"); return 1
+    if path_to_key_info is None:
+        print("Error: Global key map not found or failed to load.")
+        print("Please run 'analyze-project' first to generate the key map.")
+        logger.error("Global key map missing or invalid. Cannot show dependencies.")
+        return 1
+    logger.info("Global key map loaded successfully.")
+    # <<< MODIFICATION END >>>
+
 
     # 2. Find path(s) for the target key string
     matching_infos = [info for info in path_to_key_info.values() if info.key_string == target_key_str]
@@ -365,6 +348,8 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
     print(f"\n--- Dependencies for Key: {target_key_str} (Path: {target_norm_path}) ---")
 
     # 3. Aggregate dependencies by reading trackers and using the global map
+    config = ConfigManager()
+    project_root = get_project_root()
     all_dependencies_by_type = defaultdict(set) # Store sets of (key_string, path_string) tuples
     all_tracker_paths = set() # Find all trackers again (logic as before)
     memory_dir_rel = config.get_path('memory_dir')
