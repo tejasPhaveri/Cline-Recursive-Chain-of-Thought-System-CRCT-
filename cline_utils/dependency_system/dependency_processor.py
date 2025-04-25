@@ -315,23 +315,18 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
     # 1. Load the global path_to_key_info map
     logger.info("Loading global key map...")
     path_to_key_info = load_global_key_map()
-
     if path_to_key_info is None:
         print("Error: Global key map not found or failed to load.")
         print("Please run 'analyze-project' first to generate the key map.")
         logger.error("Global key map missing or invalid. Cannot show dependencies.")
         return 1
     logger.info("Global key map loaded successfully.")
-    # <<< MODIFICATION END >>>
-
 
     # 2. Find path(s) for the target key string
     matching_infos = [info for info in path_to_key_info.values() if info.key_string == target_key_str]
-
     if not matching_infos:
         print(f"Error: Key string '{target_key_str}' not found in the project.")
         return 1
-
     target_info: KeyInfo
     if len(matching_infos) > 1:
         print(f"Warning: Key string '{target_key_str}' is ambiguous and matches multiple paths:")
@@ -343,7 +338,6 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
         print(f"Using the first match: {target_info.norm_path}")
     else:
         target_info = matching_infos[0]
-
     target_norm_path = target_info.norm_path
     print(f"\n--- Dependencies for Key: {target_key_str} (Path: {target_norm_path}) ---")
 
@@ -351,6 +345,7 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
     config = ConfigManager()
     project_root = get_project_root()
     all_dependencies_by_type = defaultdict(set) # Store sets of (key_string, path_string) tuples
+    origin_tracker_map = defaultdict(lambda: defaultdict(set))
     all_tracker_paths = set() # Find all trackers again (logic as before)
     memory_dir_rel = config.get_path('memory_dir')
     if not memory_dir_rel: print("Error: memory_dir not configured."); return 1
@@ -376,28 +371,30 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
 
     if not all_tracker_paths: print("Warning: No tracker files found."); # Proceed, might have only target key info
 
+    # Loop through trackers to aggregate dependencies
     for tracker_path in all_tracker_paths:
         try:
             tracker_data = read_tracker_file(tracker_path)
             if not tracker_data or not tracker_data.get("keys") or not tracker_data.get("grid"): continue
-
-            local_keys_map = tracker_data["keys"] # Key string -> Path string (local defs)
+            local_keys_map = tracker_data["keys"]
             grid = tracker_data["grid"]
-            sorted_keys_local = sort_key_strings_hierarchically(list(local_keys_map.keys())) # Use hierarchical sort
+            sorted_keys_local = sort_key_strings_hierarchically(list(local_keys_map.keys()))
 
             if target_key_str in local_keys_map:
                 logger.debug(f"Analyzing dependencies for '{target_key_str}' in {os.path.basename(tracker_path)}...")
                 # Use the standard grid function, passing locally sorted keys
                 deps_from_this_grid = get_dependencies_from_grid(grid, target_key_str, sorted_keys_local)
 
-                # Merge results, looking up paths in the GLOBAL map
+                # Merge results and track origins for p/s/S
                 for dep_type, key_list in deps_from_this_grid.items():
                     for dep_key_str in key_list:
                          # Find the KeyInfo for this dependency key string globally
                          dep_info = next((info for info in path_to_key_info.values() if info.key_string == dep_key_str), None)
                          dep_path_str = dep_info.norm_path if dep_info else "PATH_NOT_FOUND_GLOBALLY"
+                         # Add to main aggregation set
                          all_dependencies_by_type[dep_type].add((dep_key_str, dep_path_str))
-
+                         if dep_type in ('p', 's', 'S'):
+                             origin_tracker_map[dep_type][dep_key_str].add(tracker_path)
         except Exception as e:
             logger.error(f"Failed to read or process tracker {tracker_path} during dependency aggregation: {e}", exc_info=True)
             print(f"Warning: Error processing {tracker_path}. See debug.txt for details.")
@@ -412,7 +409,7 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
         print(f"\n{section_title}:")
         dep_set = all_dependencies_by_type.get(dep_char)
         if dep_set:
-            # Define helper for hierarchical sorting within the print loop
+            # Define helper for hierarchical sorting (unchanged)
             def _hierarchical_sort_key_func(key_str: str):
                 import re # Import re locally if not globally available
                 KEY_PATTERN = r'\d+|\D+' # Pattern from key_manager
@@ -424,10 +421,22 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
                     logger.warning(f"Could not convert parts for sorting display key '{key_str}'")
                     return parts
 
-            # Sort by key string using hierarchical sort helper
             sorted_deps = sorted(list(dep_set), key=lambda item: _hierarchical_sort_key_func(item[0]))
-            for dep_key, dep_path in sorted_deps: print(f"  - {dep_key}: {dep_path}")
-        else: print("  None")
+
+            for dep_key, dep_path in sorted_deps:
+                # <<< MODIFIED: Check for and add origin info for p/s/S >>>
+                origin_info = ""
+                if dep_char in ('p', 's', 'S'):
+                    origins = origin_tracker_map.get(dep_char, {}).get(dep_key, set())
+                    if origins:
+                        # Format origin filenames nicely
+                        origin_filenames = sorted([os.path.basename(p) for p in origins])
+                        origin_info = f" (In: {', '.join(origin_filenames)})"
+                # Print with optional origin info
+                print(f"  - {dep_key}: {dep_path}{origin_info}")
+                # <<< END MODIFIED >>>
+        else:
+            print("  None")
     print("\n------------------------------------------")
     return 0
 
