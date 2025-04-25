@@ -553,27 +553,43 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
         final_key_defs = {info.key_string: info.norm_path for info in filtered_modules_info.values()}
 
         logger.info(f"Main tracker update for {len(relevant_keys_for_grid)} modules.")
-        logger.debug("Performing main tracker aggregation...")
-        try:
-            # Aggregation uses path_to_key_info and filtered_modules_info (path->info)
-            # Result is Dict[Source Path -> List[(Target Path, char)]]
-            aggregated_result_paths = main_tracker_data["dependency_aggregation"](
-                project_root, path_to_key_info, filtered_modules_info, file_to_module
-            )
-            # Convert path-based aggregation result to key-string based suggestions
-            logger.debug("Converting aggregated path results to key string suggestions...")
-            for src_path, targets in aggregated_result_paths.items():
-                 src_key_info = path_to_key_info.get(src_path); src_key_string = src_key_info.key_string if src_key_info else None
-                 if not src_key_string or src_key_string not in final_key_defs: continue
-                 for target_path, dep_char in targets:
-                      target_key_info = path_to_key_info.get(target_path); target_key_string = target_key_info.key_string if target_key_info else None
-                      if target_key_string and target_key_string in final_key_defs:
-                           final_suggestions_to_apply[src_key_string].append((target_key_string, dep_char))
-            logger.info(f"Main tracker aggregation complete. Found {sum(len(v) for v in final_suggestions_to_apply.values())} relevant aggregated dependencies.")
-        except Exception as agg_err:
-            logger.error(f"Main tracker aggregation failed: {agg_err}", exc_info=True)
-        # Continue with empty suggestions if aggregation fails
-        pass
+
+        # <<< MODIFIED: Conditional Aggregation >>>
+        if not force_apply_suggestions:
+            # Run aggregation ONLY if not forcing (i.e., called from analyze-project)
+            logger.debug("Performing main tracker aggregation...")
+            try:
+                aggregated_result_paths = main_tracker_data["dependency_aggregation"](
+                    project_root, path_to_key_info, filtered_modules_info, file_to_module
+                )
+                logger.debug("Converting aggregated path results to key string suggestions...")
+                for src_path, targets in aggregated_result_paths.items():
+                     # ... (aggregation result conversion - unchanged) ...
+                     src_key_info = path_to_key_info.get(src_path); src_key_string = src_key_info.key_string if src_key_info else None
+                     if not src_key_string or src_key_string not in final_key_defs: continue
+                     for target_path, dep_char in targets:
+                          target_key_info = path_to_key_info.get(target_path); target_key_string = target_key_info.key_string if target_key_info else None
+                          if target_key_string and target_key_string in final_key_defs:
+                               final_suggestions_to_apply[src_key_string].append((target_key_string, dep_char))
+                logger.info(f"Main tracker aggregation complete. Found {sum(len(v) for v in final_suggestions_to_apply.values())} relevant aggregated dependencies.")
+            except Exception as agg_err:
+                logger.error(f"Main tracker aggregation failed: {agg_err}", exc_info=True)
+        else:
+            # If forcing (add-dependency), use the provided suggestions directly
+            logger.debug("Skipping aggregation for main tracker (force_apply=True). Using provided suggestions.")
+            if suggestions:
+                # Validate provided suggestions against relevant keys for the main tracker
+                for src_key, deps in suggestions.items():
+                    if src_key in final_key_defs:
+                        valid_deps = [(tgt, char) for tgt, char in deps if tgt in final_key_defs]
+                        if valid_deps:
+                            final_suggestions_to_apply[src_key].extend(valid_deps)
+                    else:
+                         logger.warning(f"Source key '{src_key}' from forced suggestion not found in main tracker keys. Skipping.")
+            else:
+                 logger.warning("force_apply=True for main tracker but no suggestions provided.")
+        # <<< END MODIFIED >>>
+        pass # End of main tracker block
 
     elif tracker_type == "doc":
         output_file = doc_tracker_data["get_tracker_path"](project_root)
