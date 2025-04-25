@@ -539,8 +539,6 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
     # Suggestions filtered/aggregated for THIS tracker (Key STRING -> List[(Key STRING, char)])
     final_suggestions_to_apply = defaultdict(list)
     module_path = ""
-    # <<< REMOVED structural_deps init here >>>
-    # <<< Initialize min_positive_priority here for safety across all types >>>
     min_positive_priority = get_priority('s')
     if min_positive_priority <= 1: logger.warning("Min priority ('s') <= 1. Using 2."); min_positive_priority = 2
 
@@ -590,75 +588,16 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
 
         logger.info(f"Doc tracker update. Definitions: {len(final_key_defs)} items. Grid keys: {len(relevant_keys_for_grid)}.")
 
-        # --- Prepare initial dependency map for structural rules ---
-        # This map will store predetermined 'x' and 'n' based on hierarchy
-        structural_deps = defaultdict(dict) # {row_key: {col_key: char}}
-
-        # Pre-calculate structural dependencies ('x' for parent-child, 'n' for dir-non-child)
-        logger.debug("Applying structural dependency rules for doc tracker directories/files...")
-        key_string_to_info = {info.key_string: info for info in filtered_doc_info_map.values()}
-        sorted_grid_keys = sort_key_strings_hierarchically(relevant_keys_for_grid) # Sort once for consistency
-
-        for row_key_str in sorted_grid_keys:
-            row_info = key_string_to_info.get(row_key_str)
-            if not row_info: continue # Should not happen if derived correctly
-
-            for col_key_str in sorted_grid_keys:
-                if row_key_str == col_key_str: continue # Skip diagonal
-                col_info = key_string_to_info.get(col_key_str)
-                if not col_info: continue
-
-                # --- Refined Structural Logic ---
-                row_is_dir = row_info.is_directory
-                col_is_dir = col_info.is_directory
-
-                # Check if this pair has already been processed (due to reciprocal setting)
-                if structural_deps.get(row_key_str, {}).get(col_key_str) is not None:
-                    continue
-
-                # Case 1: Directory <-> Item (File or Dir) *within* its subtree
-                if row_is_dir and is_subpath(col_info.norm_path, row_info.norm_path):
-                    # Mutual dependency 'x' for anything contained within a directory
-                    structural_deps[row_key_str][col_key_str] = 'x'
-                    structural_deps[col_key_str][row_key_str] = 'x'
-                    # logger.debug(f"  Structural Rule: Setting {row_key_str} <-> {col_key_str} = 'x' (Dir-Contains)")
-
-                # Case 2: Item (File or Dir) <-> Directory containing it
-                elif col_is_dir and is_subpath(row_info.norm_path, col_info.norm_path):
-                    # Same as above, just roles reversed
-                    structural_deps[row_key_str][col_key_str] = 'x'
-                    structural_deps[col_key_str][row_key_str] = 'x'
-                    # logger.debug(f"  Structural Rule: Setting {row_key_str} <-> {col_key_str} = 'x' (Contained-In-Dir)")
-
-                # Case 3: Directory <-> Item *outside* its subtree
-                elif row_is_dir and not is_subpath(col_info.norm_path, row_info.norm_path):
-                    structural_deps[row_key_str][col_key_str] = 'n'
-                    structural_deps[col_key_str][row_key_str] = 'n' # *** Set both directions for 'n' ***
-                    # logger.debug(f"  Structural Rule: Setting {row_key_str} -> {col_key_str} = 'n' (Dir-Outside)")
-                elif col_is_dir and not is_subpath(row_info.norm_path, col_info.norm_path):
-                    structural_deps[row_key_str][col_key_str] = 'n'
-                    structural_deps[col_key_str][row_key_str] = 'n'
-                    # logger.debug(f"  Structural Rule: Setting {col_key_str} -> {row_key_str} = 'n' (Outside-Dir)")
-
         # --- Filter semantic suggestions ---
-        # Keep suggestions only if they are NOT overridden by a structural rule ('x' or 'n')
-        # and if both source and target are in the final defs
+
         if suggestions:
-             logger.debug("Filtering semantic suggestions against structural rules...")
+             logger.debug("Pre-filtering semantic suggestions for relevance...")
              for src_key, targets in suggestions.items():
                   # Only include suggestions where source and target are in the final defs
                   if src_key in final_key_defs:
-                       valid_targets = []
-                       for tgt, char in targets:
-                            if tgt in final_key_defs:
-                                 # Check if this pair has a pre-defined structural dependency
-                                 structural_char = structural_deps.get(src_key, {}).get(tgt)
-                                 if structural_char is None: # No structural rule applies, keep suggestion
-                                      valid_targets.append((tgt, char))
-                                 # else: logger.debug(f"  Suggestion {src_key}->{tgt} ('{char}') overridden by structural rule ('{structural_char}')")
-                       if valid_targets:
-                           final_suggestions_to_apply[src_key].extend(valid_targets)
-        pass
+                       valid_targets = [(tgt, char) for tgt, char in targets if tgt in final_key_defs]
+                       if valid_targets: final_suggestions_to_apply[src_key].extend(valid_targets)
+        pass # Ensures fall-through is prevented
 
     elif tracker_type == "mini":
         # --- Mini Tracker Specific Logic ---
@@ -837,7 +776,6 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                      # logger.debug(f"Mini filter: Adding suggestion {src_key_str} -> {target_key_str} ('{dep_char}')")
                      final_suggestions_to_apply[src_key_str].append((target_key_str, dep_char)) # Add directly
 
-
     else:
         raise ValueError(f"Unknown tracker type: {tracker_type}")
 
@@ -906,7 +844,6 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
              current_last_key_edit = last_key_edit_msg # Use message generated in else block
         current_last_grid_edit = "Initial creation"
         tracker_exists = True # Mark as existing now
-
 
     # --- Update Existing Tracker ---
     logger.debug(f"Updating tracker: {output_file}")
@@ -1026,68 +963,113 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
             except Exception as e:
                 logger.warning(f"Grid Rebuild: Error processing row '{old_row_key}' in {output_file}: {e}. Skipping copy.", exc_info=False) # Less verbose exc_info
 
-    # --- Apply Suggestions (Filtered or Aggregated) ---
-    suggestion_applied = False # Flag to track if grid content actually changed
-    applied_manual_source = None # Track source key for manual message
-    applied_manual_targets = [] # Track target keys for manual message
-    applied_manual_dep_type = None # Track dep type for manual message
+    # --- Apply Suggestions (Includes Reciprocal/Mutual Logic & Modified Conflict Handling) ---
+    suggestion_applied = False
+    applied_manual_source = None; applied_manual_targets = []; applied_manual_dep_type = None
 
     if final_suggestions_to_apply:
         logger.debug(f"Applying {sum(len(v) for v in final_suggestions_to_apply.values())} suggestions to grid for {output_file} (Force Apply: {force_apply_suggestions})") # Log force flag
+        # Use final_key_to_idx created during grid initialization
+        key_to_idx = final_key_to_idx # Rename for clarity
+
+        # Iterate through suggestions and apply them, handling reciprocals on the fly
         for row_key, deps in final_suggestions_to_apply.items():
-            if row_key not in final_key_to_idx: continue
+            if row_key not in key_to_idx: continue
+            # Get the current state of the row being modified in the temp grid
+            # Ensure we work with the *mutable* list in the dictionary
             current_decomp_row = temp_decomp_grid.get(row_key)
-            if not current_decomp_row: continue
+            if not current_decomp_row: continue # Should not happen
+            row_idx = key_to_idx[row_key]
 
-            for col_key, dep_char in deps: # dep_char is the SUGGESTED character
-                if col_key not in final_key_to_idx: continue
+            for col_key, dep_char in deps:
+                if col_key not in key_to_idx: continue
                 if row_key == col_key: continue
+                col_idx = key_to_idx[col_key]
+                existing_char_in_grid = current_decomp_row[col_idx] # Char currently in the grid cell
 
-                col_idx = final_key_to_idx[col_key]
-                existing_char = current_decomp_row[col_idx] # Character already in the grid
+                applied_this_iter = False
+                final_char_to_apply = dep_char # Start with the suggested char
+                upgrade_to_x = False # Flag to track if 'x' upgrade occurs
 
-                applied_this_iter = False # Track if this specific suggestion caused a change
+                # --- Determine if suggestion should be applied ---
+                should_apply_suggestion = False
                 if force_apply_suggestions:
-                    # Directly apply the dependency if forcing, unless suggestion is placeholder
-                    if dep_char != PLACEHOLDER_CHAR:
-                        if existing_char != dep_char: # Only apply if change needed
-                            logger.debug(f"Force applying suggestion: {row_key} -> {col_key} ('{dep_char}') over existing ('{existing_char}')")
-                            current_decomp_row[col_idx] = dep_char
-                            suggestion_applied = True # Mark grid as changed
-                            applied_this_iter = True
-                        # else: logger.debug(f"Force apply: No change needed for {row_key} -> {col_key} ('{dep_char}')")
-                else:
+                    # Apply if forcing, suggestion isn't placeholder, and it's different
+                    if dep_char != PLACEHOLDER_CHAR and existing_char_in_grid != dep_char:
+                        should_apply_suggestion = True
+                elif existing_char_in_grid == PLACEHOLDER_CHAR and dep_char != PLACEHOLDER_CHAR:
+                     # Apply if grid is placeholder and suggestion isn't
+                     should_apply_suggestion = True
 
-                    if existing_char == PLACEHOLDER_CHAR and dep_char != PLACEHOLDER_CHAR:
-                        current_decomp_row[col_idx] = dep_char
+                # --- If applying, check for 'x' upgrade or simple reciprocal ---
+                if should_apply_suggestion:
+                    # <<< MODIFIED MUTUAL CHECK >>>
+                    # Check if suggestion is directional ('<' or '>')
+                    if dep_char in ('<', '>'):
+                        reverse_decomp_row = temp_decomp_grid.get(col_key)
+                        if reverse_decomp_row and row_idx < len(reverse_decomp_row):
+                             char_in_reverse = reverse_decomp_row[row_idx]
+                             # Check if the reverse direction ALSO has the SAME directional char
+                             if char_in_reverse == dep_char:
+                                 logger.debug(f"Mutual Apply: Found '{dep_char}' for {row_key} <-> {col_key}. Upgrading both to 'x'.")
+                                 final_char_to_apply = 'x'
+                                 # Update the reverse direction in the grid immediately
+                                 reverse_decomp_row[row_idx] = 'x'
+                                 suggestion_applied = True # Mark grid change
+                                 upgrade_to_x = True # Set flag
+                    # <<< END MODIFIED MUTUAL CHECK >>>
+
+                    # Apply the final character (original suggestion or 'x')
+                    if existing_char_in_grid != final_char_to_apply: # Check again in case 'x' upgrade happened
+                        logger.debug(f"Applying to grid: {row_key} -> {col_key} = '{final_char_to_apply}' (Force: {force_apply_suggestions}, Sugg: '{dep_char}', Existed: '{existing_char_in_grid}')")
+                        current_decomp_row[col_idx] = final_char_to_apply
                         suggestion_applied = True
                         applied_this_iter = True
                         logger.debug(f"Applied suggestion: {row_key} -> {col_key} ({dep_char}) in {output_file}")
 
-                    # Handle conflicts ONLY if suggestion wasn't applied (i.e., existing_char != 'p')
-                    # and the suggestion is different from the existing char
-                    elif existing_char != PLACEHOLDER_CHAR and existing_char != DIAGONAL_CHAR and existing_char != dep_char:
-                        # --- Refined Warning Logic ---
-                        try:
-                            existing_priority = get_priority(existing_char)
-                            suggestion_priority = get_priority(dep_char)
+                    # If NOT upgraded to 'x', check for simple reciprocal needed
+                    if not upgrade_to_x:
+                        reciprocal_char = None
+                        if dep_char == '>': reciprocal_char = '<'
+                        elif dep_char == '<': reciprocal_char = '>' # <<< FIXED: Handle reciprocal for '<' -> '>'
+
+                        if reciprocal_char: # Check if a reciprocal exists
+                            reverse_decomp_row = temp_decomp_grid.get(col_key)
+                            if reverse_decomp_row and row_idx < len(reverse_decomp_row):
+                                char_in_reverse = reverse_decomp_row[row_idx]
+                                # Add reciprocal only if reverse is placeholder or lower priority
+                                if char_in_reverse == PLACEHOLDER_CHAR or get_priority(reciprocal_char) > get_priority(char_in_reverse):
+                                     logger.debug(f"Reciprocal Apply: Setting {col_key} -> {row_key} = '{reciprocal_char}'...")
+                                     reverse_decomp_row[row_idx] = reciprocal_char
+                                     suggestion_applied = True
 
                             # Only warn if the suggestion is STRONGER (higher priority number)
                             # than the existing character, AND the existing character is NOT 'n'.
                             # 'n' represents a manual override that suggestions should never overwrite or warn about.
-                            if existing_char != 'n' and suggestion_priority > existing_priority:
-                                # Example scenario: existing='s' (low priority), suggestion='S' (higher priority) -> WARN
-                                warning_msg = (f"Suggestion Conflict in {os.path.basename(output_file)}: For {row_key}->{col_key}, "
-                                               f"grid has '{existing_char}' (prio {existing_priority}), suggestion is '{dep_char}' (prio {suggestion_priority}). Grid value kept.")
-                                logger.warning(warning_msg)
-                            # else: # Optionally log non-warnings at DEBUG level
-                                # logger.debug(f"Suggestion Ignored (No Warn): {row_key}->{col_key}, grid='{existing_char}', sugg='{dep_char}'")
+                # --- Handle Conflicts if suggestion NOT applied ---
+                elif not force_apply_suggestions and existing_char_in_grid not in (PLACEHOLDER_CHAR, DIAGONAL_CHAR) and existing_char_in_grid != dep_char:
+                    try:
+                        existing_priority = get_priority(existing_char_in_grid)
+                        suggestion_priority = get_priority(dep_char)
 
-                        except KeyError as e:
-                            # Handle case where a character might not be in the priority map
-                            logger.error(f"Character priority lookup failed for '{str(e)}' during suggestion conflict check. Grid value kept.")
-                        except Exception as e:
-                            logger.error(f"Error during suggestion priority check: {e}. Grid value kept.")
+                        # Check if suggestion is STRONGER AND existing is NOT 'n'
+                        # User confirmed 'n' will have priority 5, so this also correctly prevents 'n' override
+                        if existing_char_in_grid != 'n' and suggestion_priority > existing_priority:
+                            # <<< APPLY the suggestion instead of just warning >>>
+                            logger.info(f"Suggestion Conflict RESOLVED in {os.path.basename(output_file)}: For {row_key}->{col_key}, "
+                                           f"applying suggestion '{dep_char}' (prio {suggestion_priority}) over existing '{existing_char_in_grid}' (prio {existing_priority}).")
+                            current_decomp_row[col_idx] = dep_char
+                            suggestion_applied = True # Mark grid change
+                            applied_this_iter = True # Indicate change happened here
+                        # else:
+                            # Suggestion is weaker or equal, or existing is 'n'. Keep existing.
+                            # logger.debug(f"Suggestion Conflict Ignored: {row_key}->{col_key}, grid='{existing_char_in_grid}', sugg='{dep_char}'. Grid value kept.")
+
+                    except KeyError as e:
+                        # Handle case where a character might not be in the priority map
+                        logger.error(f"Character priority lookup failed for '{str(e)}' during suggestion conflict check. Grid value kept.")
+                    except Exception as e:
+                        logger.error(f"Error during suggestion priority check: {e}. Grid value kept.")
                 
                 # <<< Store details if force applying and a change occurred >>>
                 if force_apply_suggestions and applied_this_iter:

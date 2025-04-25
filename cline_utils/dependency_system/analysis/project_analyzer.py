@@ -322,66 +322,68 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
              combined_suggestions_per_source[source_key] = _combine_suggestions_with_char_priority(suggestion_list)
         all_suggestions = combined_suggestions_per_source # Replace raw with combined
 
-        # --- Add reciprocal '<'/'x' dependencies ---
-        logger.debug("Adding/Merging reciprocal dependencies ('<' or 'x')...")
-        get_priority = config.get_char_priority
-        keys_with_suggestions = list(all_suggestions.keys()) # Key strings
+        # # --- Add reciprocal '<'/'x' dependencies ---
+        # logger.debug("Adding/Merging reciprocal dependencies ('<' or 'x')...")
+        # get_priority = config.get_char_priority
+        # keys_with_suggestions = list(all_suggestions.keys()) # Key strings
+        # 
+        # for source_key in keys_with_suggestions:
+        #     # Use list() to avoid modifying dict during iteration if suggestion list changes
+        #     current_source_suggestions = list(all_suggestions.get(source_key, []))
+        # 
+        #     for target_key, dep_char in current_source_suggestions:
+        #          # <<< *** MODIFIED CHECK *** >>>
+        #          # Check if target_key corresponds to a valid path in the map
+        #          # This requires finding *a* path for the target key, which is ambiguous.
+        #          # Assumption: suggest_dependencies returned valid target_key strings that exist in the map.
+        #          # We need a way to confirm target_key represents a valid entity without needing its path here.
+        #          # Let's rely on the suggestion function having done its job for now.
+        #          # The check `target_key == source_key` is still valid.
+        #          if target_key == source_key:
+        #                continue
+        # 
+        #          target_suggestions = all_suggestions.setdefault(target_key, [])
+        #          # Use a map for quick lookup of existing char from target back to source
+        #          target_suggestion_map = {t: c for t, c in target_suggestions}
+        #          existing_char_in_target = target_suggestion_map.get(source_key)
+        #          existing_priority = get_priority(existing_char_in_target) if existing_char_in_target else -1
+        # 
+        #          reciprocal_char = None
+        #          reciprocal_priority = -1
+        # 
+        #          if dep_char == '>':
+        #               reciprocal_char = '<'
+        #               reciprocal_priority = get_priority('<')
+        #          elif dep_char == '<':
+        #               reciprocal_char = '>'
+        #               reciprocal_priority = get_priority('>')
+        #          # Add other reciprocal pairs if needed (e.g., 'd'?)
+        # 
+        #          if reciprocal_char:
+        #              if reciprocal_priority > existing_priority:
+        #                   # Remove existing lower priority char if present
+        #                   target_suggestions[:] = [(t, c) for t, c in target_suggestions if t != source_key]
+        #                   # Add the new reciprocal dependency
+        #                   logger.debug(f"Reciprocal: Adding {target_key} -> {source_key} ('{reciprocal_char}') based on {source_key}->{target_key} ('{dep_char}')")
+        #                   target_suggestions.append((source_key, reciprocal_char))
+        #              # MERGE to 'x' if mutual dependency (A->B='<' AND B->A='<') is found
+        #              elif dep_char == '<' and existing_char_in_target == '<': # Check for matching '<' in both directions
+        #                   if existing_char_in_target != 'x': # Avoid re-merging 'x'
+        #                        # Update target -> source (B -> A) to 'x'
+        #                        target_suggestions[:] = [(t, 'x' if t == source_key else c) for t, c in target_suggestions]
+        #                        logger.debug(f"Mutual: Merging {target_key} -> {source_key} to 'x' due to matching '<' dependencies.") # Updated log
+        # 
+        #                        # Also update the original source -> target (A -> B) to 'x'
+        #                        current_source_suggestions_for_update = all_suggestions.get(source_key, []) # Refetch
+        #                        if current_source_suggestions_for_update: # Check if list exists before modifying
+        #                           current_source_suggestions_for_update[:] = [(orig_t, 'x' if orig_t == target_key else orig_c) for orig_t, orig_c in current_source_suggestions_for_update]
+        #                           logger.debug(f"Mutual: Merging {source_key} -> {target_key} to 'x' due to matching '<' dependencies.") # Updated log
+        # 
+        #                   # else: Keep existing for other equal priority conflicts
 
-        for source_key in keys_with_suggestions:
-            # Use list() to avoid modifying dict during iteration if suggestion list changes
-            current_source_suggestions = list(all_suggestions.get(source_key, []))
-
-            for target_key, dep_char in current_source_suggestions:
-                 # <<< *** MODIFIED CHECK *** >>>
-                 # Check if target_key corresponds to a valid path in the map
-                 # This requires finding *a* path for the target key, which is ambiguous.
-                 # Assumption: suggest_dependencies returned valid target_key strings that exist in the map.
-                 # We need a way to confirm target_key represents a valid entity without needing its path here.
-                 # Let's rely on the suggestion function having done its job for now.
-                 # The check `target_key == source_key` is still valid.
-                 if target_key == source_key:
-                       continue
-
-                 target_suggestions = all_suggestions.setdefault(target_key, [])
-                 # Use a map for quick lookup of existing char from target back to source
-                 target_suggestion_map = {t: c for t, c in target_suggestions}
-                 existing_char_in_target = target_suggestion_map.get(source_key)
-                 existing_priority = get_priority(existing_char_in_target) if existing_char_in_target else -1
-
-                 reciprocal_char = None
-                 reciprocal_priority = -1
-
-                 if dep_char == '>':
-                      reciprocal_char = '<'
-                      reciprocal_priority = get_priority('<')
-                 elif dep_char == '<':
-                      reciprocal_char = '>'
-                      reciprocal_priority = get_priority('>')
-                 # Add other reciprocal pairs if needed (e.g., 'd'?)
-
-                 if reciprocal_char:
-                     if reciprocal_priority > existing_priority:
-                          # Remove existing lower priority char if present
-                          target_suggestions[:] = [(t, c) for t, c in target_suggestions if t != source_key]
-                          # Add the new reciprocal dependency
-                          logger.debug(f"Reciprocal: Adding {target_key} -> {source_key} ('{reciprocal_char}') based on {source_key}->{target_key} ('{dep_char}')")
-                          target_suggestions.append((source_key, reciprocal_char))
-                     # MERGE to 'x' if mutual dependency (A->B='<' AND B->A='<') is found
-                     elif dep_char == '<' and existing_char_in_target == '<': # Check for matching '<' in both directions
-                          if existing_char_in_target != 'x': # Avoid re-merging 'x'
-                               # Update target -> source (B -> A) to 'x'
-                               target_suggestions[:] = [(t, 'x' if t == source_key else c) for t, c in target_suggestions]
-                               logger.debug(f"Mutual: Merging {target_key} -> {source_key} to 'x' due to matching '<' dependencies.") # Updated log
-
-                               # Also update the original source -> target (A -> B) to 'x'
-                               current_source_suggestions_for_update = all_suggestions.get(source_key, []) # Refetch
-                               if current_source_suggestions_for_update: # Check if list exists before modifying
-                                  current_source_suggestions_for_update[:] = [(orig_t, 'x' if orig_t == target_key else orig_c) for orig_t, orig_c in current_source_suggestions_for_update]
-                                  logger.debug(f"Mutual: Merging {source_key} -> {target_key} to 'x' due to matching '<' dependencies.") # Updated log
-
-                          # else: Keep existing for other equal priority conflicts
         results["dependency_suggestion"]["status"] = "success"
-        logger.info("Dependency suggestion and reciprocal handling completed.")
+        logger.info("Dependency suggestion combining completed.")
+
 
         # --- Update Trackers ---
         logger.info("Updating trackers...")
