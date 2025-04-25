@@ -533,14 +533,13 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
 
     # --- Determine Type-Specific Settings and Paths ---
     output_file = "" # Final path determined within type block
-    # ... (variables for final_key_defs, relevant_keys_for_grid, final_suggestions_to_apply initialized) ...
     final_key_defs: Dict[str, str] = {}
     # Key STRINGS relevant for GRID rows/columns in this tracker
     relevant_keys_for_grid: List[str] = []
     # Suggestions filtered/aggregated for THIS tracker (Key STRING -> List[(Key STRING, char)])
     final_suggestions_to_apply = defaultdict(list)
-    module_path = "" # Keep track of module path for mini-trackers
-    structural_deps = defaultdict(dict) # Initialize for doc tracker use
+    module_path = ""
+    # <<< REMOVED structural_deps init here >>>
     # <<< Initialize min_positive_priority here for safety across all types >>>
     min_positive_priority = get_priority('s')
     if min_positive_priority <= 1: logger.warning("Min priority ('s') <= 1. Using 2."); min_positive_priority = 2
@@ -949,22 +948,60 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
     # Use hierarchical sort for the list of keys that were in the old file
     old_keys_list = sort_key_strings_hierarchically(list(existing_key_defs.keys()))
     old_key_to_idx = {k: i for i, k in enumerate(old_keys_list)}; final_key_to_idx = {k: i for i, k in enumerate(final_sorted_keys_list)}
+
     # Initialize new grid structure based on the FINAL sorted list
     for row_key in final_sorted_keys_list:
         row_list = [PLACEHOLDER_CHAR] * len(final_sorted_keys_list); row_idx = final_key_to_idx.get(row_key)
         if row_idx is not None: row_list[row_idx] = DIAGONAL_CHAR
         temp_decomp_grid[row_key] = row_list
 
-    # Apply doc structural dependencies if applicable
-    if tracker_type == "doc" and 'structural_deps' in locals() and structural_deps: # Check if structural_deps was calculated
-        logger.debug("Applying pre-calculated structural dependencies ('x', 'n') to grid...")
-        for row_key, cols in structural_deps.items():
-            if row_key in final_key_to_idx:
-                for col_key, dep_char in cols.items():
-                    if col_key in final_key_to_idx:
-                        row_idx = final_key_to_idx[row_key]; col_idx = final_key_to_idx[col_key]
-                        if row_idx != col_idx: temp_decomp_grid[row_key][col_idx] = dep_char
-    # Copy old values
+    # <<< --- COMMON Structural Dependency Calculation & Application --- >>>
+    structural_deps = defaultdict(dict) # Initialize here
+    if tracker_type == "doc" or tracker_type == "mini":
+        # Build Key String -> KeyInfo map for keys in THIS grid
+        key_string_to_info_local = {
+            k_str: path_to_key_info.get(final_key_defs.get(k_str))
+            for k_str in final_sorted_keys_list
+            if final_key_defs.get(k_str) and path_to_key_info.get(final_key_defs.get(k_str))
+        }
+        if key_string_to_info_local: # Proceed only if map is not empty
+            logger.debug(f"Calculating structural dependencies for {tracker_type} tracker...")
+            for row_key in final_sorted_keys_list:
+                row_info = key_string_to_info_local.get(row_key)
+                if not row_info or not row_info.is_directory: continue # Rules originate from directories
+
+                for col_key in final_sorted_keys_list:
+                    if row_key == col_key: continue
+                    col_info = key_string_to_info_local.get(col_key)
+                    if not col_info: continue
+
+                    # Skip if already processed (due to reciprocal setting)
+                    if structural_deps.get(row_key, {}).get(col_key) is not None: continue
+
+                    # Check parent-child relationship
+                    if is_subpath(col_info.norm_path, row_info.norm_path):
+                        structural_deps[row_key][col_key] = 'x'
+                        structural_deps[col_key][row_key] = 'x'
+                    # Apply 'n' rule ONLY for doc trackers for unrelated dir/file pairs
+                    elif tracker_type == "doc":
+                        structural_deps[row_key][col_key] = 'n'
+                        structural_deps[col_key][row_key] = 'n'
+
+            # Apply calculated rules to the temp_decomp_grid
+            applied_count = 0
+            logger.debug(f"Applying structural dependency rules to grid...")
+            for row_key, cols in structural_deps.items():
+                 if row_key in final_key_to_idx:
+                     for col_key, dep_char in cols.items():
+                          if col_key in final_key_to_idx:
+                              row_idx = final_key_to_idx[row_key]; col_idx = final_key_to_idx[col_key]
+                              if row_idx != col_idx:
+                                   # Apply directly, overwriting placeholder
+                                   temp_decomp_grid[row_key][col_idx] = dep_char
+                                   applied_count += 1
+            logger.debug(f"Applied {applied_count} structural rules.") # Count individual cell changes
+
+    # --- Copy old values ---
     logger.debug(f"Copying old grid values. Old keys count: {len(old_keys_list)}")
     for old_row_key, compressed_row in existing_grid.items():
         if old_row_key in final_key_to_idx: # Only process rows still present in the FINAL list
@@ -977,11 +1014,9 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                         old_col_key = old_keys_list[old_col_idx]
                         if old_col_key in final_key_to_idx: # If the old column key is still in the FINAL list
                             new_col_idx = final_key_to_idx[old_col_key]; new_row_idx = final_key_to_idx[old_row_key]
-                            if new_row_idx != new_col_idx: # Don't overwrite diagonal
-                                # Respect structural rules for docs
-                                structural_char = structural_deps.get(old_row_key, {}).get(old_col_key) if tracker_type == "doc" and 'structural_deps' in locals() else None
-                                if structural_char is None:
-                                    # logger.debug(f"    Copying {old_row_key}[{old_col_key}]='{value}' to new index {new_col_idx}")
+                            if new_row_idx != new_col_idx:
+                                # Only copy if target cell is STILL a placeholder
+                                if temp_decomp_grid[old_row_key][new_col_idx] == PLACEHOLDER_CHAR:
                                     temp_decomp_grid[old_row_key][new_col_idx] = value
                                 # else: logger.debug(f"    Skipping copy for {old_row_key}[{old_col_key}] due to structural rule '{structural_char}'")
                 else:
