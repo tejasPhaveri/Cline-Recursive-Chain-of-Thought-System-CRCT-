@@ -70,8 +70,8 @@
     *   Define clear objectives, key steps, dependencies, and expected        outputs for the document, ensuring alignment with project goals.
 
 5.  **Manual Dependency Linking (CRITICAL):**
-    *   **Domain Module:**  Add a link to the new Module in the `system_manifest.md` "Component Registry" section.
-    *   **Implementation Plan** Add a link to the appropriate files.
+    *   **Domain Module:** Add a link to the new Module in the `system_manifest.md` "Component Registry" section. **Additionally, after creating a new Domain Module (`*_module.md`), consider if there are crucial existing external documents (e.g., high-level requirements, core design principles, related API overviews) that this module fundamentally depends on or implements. If so, use `add-dependency` to link the primary module key (e.g., `1Ba`) or a key internal file key to the relevant external documentation key within the new mini-tracker (e.g., `add-dependency --tracker <module_file> --source-key <module_key_or_internal_key> --target-key <external_doc_key> --dep-type 'd'`).**
+    *   **Implementation Plan:** Add a link to the appropriate files.
     *   **Task Instruction:** Add a link to the appropriate files' "Tasks" section (or similar).
     * **YOU MUST MANUALLY MAINTAIN THESE LINKS.**
 
@@ -94,6 +94,7 @@
 4. **Assess Dependencies**:
    - Use `module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers to identify prerequisite tasks or modules.
    - Note dependencies that must be resolved first.
++  - **When assessing dependencies for a task within a specific module, review its corresponding `*_module.md` mini-tracker. If you identify crucial external documentation (e.g., a specific algorithm description, data format spec) directly relevant to completing the task that isn't already linked from a relevant internal code file key, consider adding this link using `add-dependency`. Target the mini-tracker, use the most relevant internal code file's key as the `--source-key`, the external doc key as the `--target-key`, and an appropriate `--dep-type` (likely 'd' or '<').**
 5. **Consider Alternatives**:
    - Explore different approaches or design patterns, discussing trade-offs where relevant.
 6. **Define Expected Output**:

@@ -77,6 +77,7 @@
         *   Run `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker <tracker_file_path>`
         *   Examine the output. Identify all lines ending with an indicator like ` (checks needed: ...)`. This indicator specifies which unresolved characters ('p' - placeholder, 's' - weak suggestion, 'S' - strong suggestion) were found in that key's dependency row *within this specific tracker*. Any key with this indicator requires further investigation.
         *   Create a list of these keys (e.g., `['1A2', '3Bc1']`) for the current tracker that need verification.
+        *   **Proactively Check for Missing External Links**: While analyzing the content of the tracker actively look for explicit references (e.g., "implements the algorithm described in `docs/algos/X.md`") or clear conceptual reliance on external files (especially documentation) that might have been missed by automated analysis. If you identify such a necessary external dependency, add it to the tracker using the `add-dependency` command.
 
 3.  **Verify Placeholders ('p') and Suggestions ('s', 'S') for Identified Keys**:
     *   Iterate through the list of keys identified in the previous step for the *current tracker*.
@@ -108,7 +109,13 @@
           ```
           (Focus on batching targets for the *same source key* and *same dependency type* per command.)
           *(Recommendation: Handle only a few target keys per `add-dependency` command for clarity.)*
-
+        *   **Remember**: When targeting a mini-tracker (`*_module.md`), this command can now add relationships to `--target-key` values that are external (foreign) keys, provided they are valid globally. The system handles adding the key definition if necessary. Use this to add the proactively identified external dependencies or correct links to external keys noted from the `show-dependencies` output.
+        ```bash
+            # Example: Set 'd' from internal code file 1Ba2 to external doc 1Aa6 in agents_module.md
+            # Reasoning: combat_agent.py (1Ba2) implements concepts defined in Multi-Agent_Collaboration.md (1Aa6).
+            python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker src/agents/agents_module.md --source-key 1Ba2 --target-key 1Aa6 --dep-type "d"
+        ```
+        
 4.  **Iterate and Complete**:
     *   Repeat Step 3 for all keys identified with `(placeholders present)` in the current tracker.
     *   Run `show-keys --tracker <tracker_file_path>` again to confirm no `(placeholders present)` remain for that tracker.
