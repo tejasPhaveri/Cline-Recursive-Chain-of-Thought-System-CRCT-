@@ -997,11 +997,26 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                     # Apply if forcing, suggestion isn't placeholder, and it's different
                     if dep_char != PLACEHOLDER_CHAR and existing_char_in_grid != dep_char:
                         should_apply_suggestion = True
+                        logger.debug(f"Force apply triggered for {row_key}->{col_key} ('{dep_char}') over ('{existing_char_in_grid}')")
                 elif existing_char_in_grid == PLACEHOLDER_CHAR and dep_char != PLACEHOLDER_CHAR:
                      # Apply if grid is placeholder and suggestion isn't
                      should_apply_suggestion = True
+                # <<< --- MODIFIED: Conflict Resolution for non-forced applies --- >>>
+                elif not force_apply_suggestions and existing_char_in_grid not in (PLACEHOLDER_CHAR, DIAGONAL_CHAR) and existing_char_in_grid != dep_char:
+                    # This block now handles ONLY the non-forced conflict scenario
+                    try:
+                        existing_priority = get_priority(existing_char_in_grid)
+                        suggestion_priority = get_priority(dep_char)
+                        # Apply if suggestion is stronger AND existing is NOT 'n'
+                        if existing_char_in_grid != 'n' and suggestion_priority > existing_priority:
+                            logger.info(f"Suggestion Conflict RESOLVED in {os.path.basename(output_file)}: Applying '{dep_char}' (prio {suggestion_priority}) over '{existing_char_in_grid}' (prio {existing_priority}) for {row_key}->{col_key}.")
+                            should_apply_suggestion = True # Set flag to apply suggestion
+                        else: logger.debug(f"Suggestion Conflict Ignored: Grid '{existing_char_in_grid}' kept over sugg '{dep_char}' for {row_key}->{col_key}.")
+                    except Exception as e: logger.error(f"Priority check error: {e}. Grid value kept.")
+                # <<< --- END MODIFIED Conflict Resolution --- >>>
 
-                # --- If applying, check for 'x' upgrade or simple reciprocal ---
+
+                # --- Apply suggestion if flag is set ---
                 if should_apply_suggestion:
                     # <<< MODIFIED MUTUAL CHECK >>>
                     # Check if suggestion is directional ('<' or '>')
@@ -1037,9 +1052,20 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                             reverse_decomp_row = temp_decomp_grid.get(col_key)
                             if reverse_decomp_row and row_idx < len(reverse_decomp_row):
                                 char_in_reverse = reverse_decomp_row[row_idx]
-                                # Add reciprocal only if reverse is placeholder or lower priority
-                                if char_in_reverse == PLACEHOLDER_CHAR or get_priority(reciprocal_char) > get_priority(char_in_reverse):
-                                     logger.debug(f"Reciprocal Apply: Setting {col_key} -> {row_key} = '{reciprocal_char}'...")
+
+                                # Determine if reciprocal should be applied based on force flag
+                                should_apply_reciprocal = False
+                                if force_apply_suggestions:
+                                     # Force apply reciprocal unless target is already 'x' or the reciprocal itself
+                                     if char_in_reverse != 'x' and char_in_reverse != reciprocal_char:
+                                         should_apply_reciprocal = True
+                                else:
+                                     # Apply reciprocal only if reverse is placeholder or lower priority (non-forced)
+                                     if char_in_reverse == PLACEHOLDER_CHAR or get_priority(reciprocal_char) > get_priority(char_in_reverse):
+                                         should_apply_reciprocal = True
+
+                                if should_apply_reciprocal:
+                                     logger.debug(f"Reciprocal Apply: Setting {col_key} -> {row_key} = '{reciprocal_char}' (Force: {force_apply_suggestions}, Existed: '{char_in_reverse}')")
                                      reverse_decomp_row[row_idx] = reciprocal_char
                                      suggestion_applied = True
 
