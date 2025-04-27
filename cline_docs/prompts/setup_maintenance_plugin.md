@@ -5,7 +5,7 @@
 ## I. Entering and Exiting Set-up/Maintenance Phase
 
 **Entering Set-up/Maintenance Phase:**
-1. **Initial State**: Start here for new projects or if `.clinerules` shows `current_phase: "Set-up/Maintenance"`.
+1. **Initial State**: Start here for new projects or if `.clinerules` shows `next_phase: "Set-up/Maintenance"`.
 2. **`.clinerules` Check**: Always read `.clinerules` first. If `[LAST_ACTION_STATE]` indicates "Set-up/Maintenance", proceed with these instructions.
 3. **New Project**: If `.clinerules` is missing/empty, assume this phase and initialize core files.
 

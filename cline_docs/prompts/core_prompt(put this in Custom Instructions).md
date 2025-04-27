@@ -2,7 +2,7 @@
 
 This outlines the fundamental principles, required files, workflow structure, and essential procedures that govern CRCT, the overarching framework within which all phases of operation function. Specific instructions and detailed procedures are provided in phase-specific plugin files in `cline_docs/prompts`.
 
-**Important Clarifications:** The CRCT system operates in distinct *phases* (Set-up/Maintenance, Strategy, Execution), controlled **exclusively** by the `current_phase` setting in `.clinerules`. "Plan Mode" or any other "Mode" is independent of this system's *phases*. Plugin loading is *always* dictated by `current_phase`.
+**Important Clarifications:** The CRCT system operates in distinct *phases* (Set-up/Maintenance, Strategy, Execution), controlled **exclusively** by the `next_phase` setting in `.clinerules`. "Plan Mode" or any other "Mode" is independent of this system's *phases*. Plugin loading is *always* dictated by `next_phase`.
 
 The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* format. **Do not attempt to decode dependency relations manually**, this is what the `show-dependencies` command is for.
 *Do not rely on what you assume are 'p' relations in the grid. The output of `show-dependencies` is the *only* place for you to view dependency relationships.*
@@ -14,7 +14,7 @@ The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* for
 
 **At initialization the LLM MUST perform the following steps, IN THIS ORDER:**
     1. **Read `.clinerules`**
-    2. **Load Plugin** for `current_phase` from `cline_docs/prompts/`.
+    2. **Load Plugin** for `next_phase` from `cline_docs/prompts/`.
     **YOU MUST LOAD THE PLUGIN INSTRUCTIONS. DO NOT PROCEED WITHOUT DOING SO.**
     3. **Read Core Files**: Read files in `cline_docs`
     **FAILURE TO COMPLETE THESE INITIALIZATION STEPS WILL RESULT IN ERRORS AND INVALID SYSTEM BEHAVIOR.**
@@ -99,7 +99,7 @@ next_phase: "Set-up/Maintenance"
 
 ## III. Recursive Chain-of-Thought Loop & Plugin Workflow
 
-**Workflow Entry Point & Plugin Loading:** Begin each CRCT session by reading `.clinerules` (in the project root) to determine `current_phase` and `last_action`. **Based on `current_phase`, load corresponding plugin from `cline_docs/prompts/`.** For example, if `.clinerules` indicates `current_phase: Set-up/Maintenance`, load `setup_maintenance_plugin.md` *in conjunction with these Custom instructions*.
+**Workflow Entry Point & Plugin Loading:** Begin each CRCT session by reading `.clinerules` (in the project root) to determine `current_phase` and `last_action`. **Based on `next_phase`, load corresponding plugin from `cline_docs/prompts/`.** For example, if `.clinerules` indicates `next_phase: Set-up/Maintenance`, load `setup_maintenance_plugin.md` *in conjunction with these Custom instructions*.
 
 Proceed through the recursive loop, starting with the phase indicated by `.clinerules`.
 
@@ -293,7 +293,7 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
 
 ## IX. Plugin Usage Guidance
 
-**Always check `.clinerules` for `current_phase`.**
+**Always check `.clinerules` for `next_phase`.**
 - **Set-up/Maintenance**: Initial setup, adding modules/docs, periodic maintenance (`cline_docs/prompts/setup_maintenance_plugin.md`).
 - **Strategy**: Task decomposition, instruction file creation, prioritization (`cline_docs/prompts/strategy_plugin.md`).
 - **Execution**: Task execution, code/file modifications (`cline_docs/prompts/execution_plugin.md`).
