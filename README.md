@@ -53,6 +53,18 @@ Cache + batch processing enable *significant* time savings.
 - **Phase-Based Workflow**: Operates in distinct phases—**Set-up/Maintenance**, **Strategy**, **Execution**—controlled by `.clinerules`.
 - **Chain-of-Thought Reasoning**: Ensures transparency with step-by-step reasoning and reflection.
 
+## **NEW**
+
+Introduced the `visualize-dependencies` command (experimental) for generating Mermaid dependency flowcharts. Features include:
+- Whole-project (python -m cline_utils.dependency_system.dependency_processor visualize-dependencies) and `--key` focused views.
+- Hierarchical subgraphs.
+- Filtering of structural, type-mismatch, and placeholder links.
+- Consolidated output (`&`) with official labels.
+- Hierarchical sorting.
+- Saves to default output files in project root.
+
+*Note: `visualize-dependencies` is experimental and may undergo significant changes.*
+
 ---
 
 ## Quickstart
