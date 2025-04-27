@@ -107,14 +107,14 @@
    *   **Directive**: Sequence the **atomic Task Instructions** defined in Step 4 based *primarily* on the **understood** dependencies ('<', '>', 'x', 'd') analyzed in Step 3.
       *   Identify foundational tasks/components: Those with no outgoing '<' dependencies within the current scope of work. These should generally be implemented first.
       *   Sequence subsequent tasks: Order subsequent tasks ensuring prerequisites are met according to your understanding of the interactions (not just the characters). For 'x' dependencies, plan for potentially iterative or closely coordinated implementation steps across the linked tasks.
-   *   Document the final sequence and the dependency-based rationale within the relevant Implementation Plan(s) or `activeContext.md`.
+   *   Document the final sequence and the dependency-based rationale within the relevant Implementation Plan(s) or the module's `*_module.md` file.
 
 6.  **Prioritize Tasks within Sequence**:
    *   Within the determined build sequence, prioritize tasks based on:
       *   Urgency/importance defined in `activeContext.md`.
       *   Potential to unblock other tasks.
       *   Logical grouping of related work.
-   *   Record the final prioritization order and explicit reasoning in `activeContext.md`.
+   *   Record the final prioritization order and explicit reasoning within the relevant Implementation Plan(s) or the module's `*_module.md` file.
 
 7.  **Present Plan**: Summarize the planned work, the determined sequence, the created/updated HDTA documents, and the task prioritization for user review and confirmation.
 
