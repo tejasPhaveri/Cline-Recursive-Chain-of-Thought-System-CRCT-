@@ -8,6 +8,8 @@ The dependencies in tracker grids (e.g., pso4p) are listed in a *compressed* for
 *Do not rely on what you assume are 'p' relations in the grid. The output of `show-dependencies` is the *only* place for you to view dependency relationships.*
 **Example**: `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
 
+*`python -m cline_utils.dependency_system.dependency_processor` is a CLI operation and should be used with the `execute_command` tool*
+
 ## Mandatory Initialization Procedure
 
 **At initialization the LLM MUST perform the following steps, IN THIS ORDER:**
