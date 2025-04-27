@@ -51,7 +51,7 @@
 1.  **Review Current State & Goals**:
     *   **Action**: Read and analyze `activeContext.md` for current priorities, decisions, and cycle goals.
     *   **Action**: Read and analyze `system_manifest.md` for system architecture and component overview.
-
+    *These should have already been read before loading this plugin. Only read if you have *not* already read them.*
 2.  **Identify Target Area(s)**:
     *   **Action**: Based on Step 1, explicitly state the primary module(s) or feature(s) selected as the focus for this planning cycle.
 
