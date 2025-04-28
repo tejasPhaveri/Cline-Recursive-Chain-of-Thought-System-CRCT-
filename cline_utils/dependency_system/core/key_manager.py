@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 ASCII_A_UPPER = 65  # ASCII value for 'A'
+ASCII_Z_UPPER = 90  # ASCII value for 'Z'
 ASCII_A_LOWER = 97  # ASCII value for 'a'
 ASCII_Z_LOWER = 122 # ASCII value for 'z'
 
@@ -72,19 +73,12 @@ def get_file_type_for_key(file_path: str) -> str:
     """
     _, ext = os.path.splitext(file_path)
     ext = ext.lower()
-
-    if ext == ".py":
-        return "py"
-    elif ext in (".js", ".ts", ".jsx", ".tsx"):
-        return "js"
-    elif ext in (".md", ".rst"):
-        return "md"
-    elif ext in (".html", ".htm"):
-        return "html"
-    elif ext == ".css":
-        return "css"
-    else:
-        return "generic"
+    if ext == ".py": return "py"
+    elif ext in (".js", ".ts", ".jsx", ".tsx"): return "js"
+    elif ext in (".md", ".rst"): return "md"
+    elif ext in (".html", ".htm"): return "html"
+    elif ext == ".css": return "css"
+    else: return "generic"
 
 
 def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = None,
@@ -92,7 +86,7 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
                  precomputed_excluded_paths: Optional[Set[str]] = None) -> Tuple[Dict[str, KeyInfo], List[KeyInfo]]:
     """
     Generate hierarchical, contextual keys for files and directories.
-    Implements tier promotion for nested subdirectories.
+    Implements tier promotion (resetting dir letter to 'A') for nested subdirectories.
     Saves the resulting key map to a file alongside this script.
     Uses ConfigManager for default exclusions if specific arguments are not provided.
 
@@ -111,12 +105,9 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
         FileNotFoundError: If a root path does not exist.
         KeyGenerationError: If key generation rules are violated (e.g., >26 subdirs).
     """
-    if isinstance(root_paths, str):
-        root_paths = [root_paths]
-
+    if isinstance(root_paths, str): root_paths = [root_paths]
     for root_path in root_paths:
-        if not os.path.exists(root_path):
-            raise FileNotFoundError(f"Root path '{root_path}' does not exist.")
+        if not os.path.exists(root_path): raise FileNotFoundError(f"Root path '{root_path}' does not exist.")
 
     config_manager = ConfigManager()
     excluded_dirs_names = set(excluded_dirs) if excluded_dirs else config_manager.get_excluded_dirs()
@@ -132,12 +123,11 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
 
     path_to_key_info: Dict[str, KeyInfo] = {} # Maps norm_path -> KeyInfo
     newly_generated_keys: List[KeyInfo] = [] # Tracks newly assigned KeyInfo objects
-    top_level_dir_count = 0 # Counter for assigning 'A', 'B', ... to root dirs
+    top_level_dir_count = 0 # Counter for assigning 'A', 'B', ... at Tier 1
 
     def parse_key(key_string: Optional[str]) -> Tuple[Optional[int], Optional[str], Optional[str]]:
         """Helper to parse a key into tier, dir, subdir components."""
-        if not key_string or not validate_key(key_string):
-            return None, None, None
+        if not key_string or not validate_key(key_string): return None, None, None
         # Match keys with subdir first (e.g., 1Aa, 1Aa12)
         match = re.match(r'^([1-9]\d*)([A-Z])([a-z])', key_string)
         if match:
@@ -195,15 +185,13 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
 
 
             # --- Process items within this directory ---
-            try:
-                # Use scandir for potentially better performance and type checking
-                items = sorted([entry.name for entry in os.scandir(dir_path)])
-            except OSError as e:
-                logger.error(f"Error accessing directory '{dir_path}': {e}")
-                return
+            try: items = sorted([entry.name for entry in os.scandir(dir_path)])
+            except OSError as e: logger.error(f"Error accessing directory '{dir_path}': {e}"); return
 
-            file_counter = 1
-            subdir_letter_ord = ASCII_A_LOWER # Counter for 'a', 'b', ... within this directory
+            # --- Initialize counters for THIS level ---
+            file_counter = 1            # For files (1A1, 1Ba1, 2A1...)
+            subdir_letter_ord = ASCII_A_LOWER # For direct subdirs (1Ba, 1Bb...)
+            promoted_dir_ord = ASCII_A_UPPER  # <<< For promoted dirs (2A, 2B...) at this level >>>
 
             # Determine if the current directory key represents a subdirectory level
             # This is the condition that triggers promotion for its children.
@@ -217,11 +205,7 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
                 try:
                     item_path = os.path.join(dir_path, item_name)
                     norm_item_path = normalize_path(item_path)
-
-                    # Use stat results for efficiency if available from scandir, otherwise os.path calls
-                    # For simplicity here, stick to os.path
-                    is_dir = os.path.isdir(item_path)
-                    is_file = os.path.isfile(item_path)
+                    is_dir = os.path.isdir(item_path); is_file = os.path.isfile(item_path)
 
                     # Apply standard exclusions (name, type, extension, etc.)
                     if any(norm_item_path.startswith(ex_path) for ex_path in exclusion_set): # Check again for items potentially matching deeper patterns
@@ -254,9 +238,8 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
                     # Check if the *parent directory* being processed is represented by a subdir key
                     is_parent_dir_a_subdir = bool(parent_key_string and re.match(r'^[1-9]\d*[A-Z][a-z]$', parent_key_string))
 
-                    # <<< *** REVISED PROMOTION TRIGGER *** >>>
-                    # Promotion happens ONLY if we find a directory INSIDE a directory that is already a subdirectory.
-                    needs_promotion = is_parent_dir_a_subdir and is_dir # Check item type HERE
+                    # <<< CORRECTED PROMOTION TRIGGER >>>
+                    needs_promotion = is_parent_key_a_subdir and is_dir
 
                     if needs_promotion:
                         # --- Tier Promotion (Triggered ONLY by Sub-Subdirectory) ---
@@ -265,13 +248,12 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
                             logger.error(f"Logic Error: Promotion needed but parent key string is missing for item '{item_name}'")
                             continue # Skip this item
 
-                        parsed_parent_tier, _, parsed_parent_subdir_letter = parse_key(parent_key_string)
-                        if parsed_parent_tier is None or parsed_parent_subdir_letter is None:
+                        parsed_parent_tier, _, _ = parse_key(parent_key_string)
+                        if parsed_parent_tier is None:
                             logger.error(f"Logic Error: Could not parse parent key '{parent_key_string}' during promotion for DIR item '{item_name}'")
                             continue # Skip this item
 
                         new_tier = parsed_parent_tier + 1
-                        new_dir_letter = parsed_parent_subdir_letter.upper() # Promoted subdir becomes dir
 
                         # Check limit BEFORE assigning character (only applies to dirs here)
                         if subdir_letter_ord > ASCII_Z_LOWER:
@@ -284,10 +266,14 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
                             logger.critical(error_msg)
                             raise KeyGenerationError(error_msg) # Terminate generation
 
-                        new_subdir_letter = chr(subdir_letter_ord)
-                        key_str = f"{new_tier}{new_dir_letter}{new_subdir_letter}"
-                        subdir_letter_ord += 1
-                        logger.debug(f"Promoting for DIR '{item_name}': parent '{parent_key_string}' -> new key '{key_str}'")
+                        # <<< CORRECTED: Use promoted_dir_ord, reset to 'A' for first one >>>
+                        new_dir_letter = chr(promoted_dir_ord)
+                        promoted_dir_ord += 1 # Increment for the *next* promoted dir at this level
+
+                        # <<< CORRECTED: Key for the promoted directory itself (e.g., 2A) >>>
+                        key_str = f"{new_tier}{new_dir_letter}"
+
+                        logger.debug(f"Promoting DIR '{item_name}': parent '{parent_key_string}' -> new key '{key_str}'")
 
                         # is_dir is always True in this block now
                         item_key_info = KeyInfo(key_str, norm_item_path, norm_dir_path, new_tier, True)
@@ -351,13 +337,10 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
                     # Catch errors processing a specific item but continue with others in the directory
                     logger.error(f"Error processing item '{item_name}' in directory '{dir_path}': {item_err}", exc_info=True)
                     # Optionally re-raise if certain errors should halt everything:
-                    # if isinstance(item_err, KeyGenerationError): raise item_err
+                    if isinstance(item_err, KeyGenerationError): raise item_err
 
-        except KeyGenerationError:
-            # Propagate the specific error upwards to halt execution
-            raise
+        except KeyGenerationError: raise # Propagate critical errors
         except Exception as dir_err:
-            # Catch general errors processing the directory itself
             logger.error(f"Failed to process directory '{dir_path}': {dir_err}", exc_info=True)
             # Decide whether to halt or continue with other root paths
             # For now, let it propagate if not KeyGenerationError
