@@ -14,7 +14,8 @@ import re
 import shutil
 from typing import Dict, List, Tuple, Any, Optional, Set
 from cline_utils.dependency_system.core.key_manager import (
-    KeyInfo, # Added
+    KeyInfo,
+    load_global_key_map, # Added
     validate_key,
     sort_keys as sort_key_info, # Renamed for clarity - only use for List[KeyInfo]
     get_key_from_path as get_key_string_from_path, # Renamed for clarity
@@ -409,7 +410,7 @@ def _write_key_definitions(file_obj: io.TextIOBase, key_map: Dict[str, str], sor
     for k in sorted_keys_list: # Iterate pre-sorted list
         v = key_map.get(k, "PATH_ERROR")
         if v != "PATH_ERROR": file_obj.write(f"{k}: {normalize_path(v)}\n")
-        else: logger.error(...)
+        else: logger.error(f"Path error writing key def: {k}")
     file_obj.write("---KEY_DEFINITIONS_END---\n")
 
 def _write_grid(file_obj: io.TextIOBase, sorted_keys_list: List[str], grid: Dict[str, str]):
@@ -519,7 +520,8 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                    file_to_module: Optional[Dict[str, str]] = None, # norm_file_path -> norm_module_path
                    new_keys: Optional[List[KeyInfo]] = None, # GLOBAL list of new KeyInfo objects
                    # <<< ADD NEW FLAG >>>
-                   force_apply_suggestions: bool = False
+                   force_apply_suggestions: bool = False,
+                   keys_to_explicitly_remove: Optional[Set[str]] = None # Keep this from previous step
                   ):
     """
     Updates or creates a tracker file based on type using contextual keys.
@@ -730,67 +732,78 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
 
             logger.debug(f"Mini Tracker ({module_key_string}): Relevant keys after processing suggestions: {len(relevant_keys_strings_set)}")
 
-
-        # 5. Finalize relevant keys and definitions
-        relevant_keys_for_grid = sort_key_strings_hierarchically(list(relevant_keys_strings_set))
-        final_key_defs = {} # Definitions map for THIS tracker (internal + relevant foreign)
-        for k_str in relevant_keys_for_grid:
-            info = next((info for info in path_to_key_info.values() if info.key_string == k_str), None)
+        # <<< START MODIFICATION: Validate relevant keys against provided map >>>
+        validated_relevant_keys_set = set()
+        invalid_keys_found = set()
+        logger.debug(f"Validating {len(relevant_keys_strings_set)} relevant keys against provided path_to_key_info map...")
+        for k_str in relevant_keys_strings_set:
+            # Check if key exists in the *input* path_to_key_info map
+            # Using a generator expression for potentially better memory efficiency
+            info = next((info for path, info in path_to_key_info.items() if info.key_string == k_str), None)
             if info:
-                 final_key_defs[k_str] = info.norm_path
+                validated_relevant_keys_set.add(k_str)
             else:
-                 # This case should be rare if relevant_keys were derived correctly
-                 final_key_defs[k_str] = "PATH_NOT_FOUND_GLOBALLY"
-                 logger.warning(f"Mini update: Path not found globally for relevant grid key {k_str}")
+                invalid_keys_found.add(k_str)
+
+        if invalid_keys_found:
+            logger.warning(f"Mini update ({os.path.basename(output_file)}): Excluding keys with no path found in provided map: {sorted(list(invalid_keys_found))}")
+            # Optionally add more detail like which internal keys linked to them if needed for debugging
+
+        # Explicitly remove keys requested for removal (e.g., from remove-key command)
+        # This ensures they are removed even if they passed the path validation step
+        if keys_to_explicitly_remove:
+            initial_validated_count = len(validated_relevant_keys_set)
+            keys_actually_removed_explicitly = validated_relevant_keys_set.intersection(keys_to_explicitly_remove)
+            validated_relevant_keys_set -= keys_to_explicitly_remove # Use set difference
+            if keys_actually_removed_explicitly:
+                 logger.info(f"Mini update ({os.path.basename(output_file)}): Explicitly removing keys as requested: {keys_actually_removed_explicitly}")
+
+        # <<< END MODIFICATION >>>
+
+        # 5. Finalize relevant keys and definitions based on the *validated* set
+        # Use the validated set to build the final lists and definitions
+        relevant_keys_for_grid = sort_key_strings_hierarchically(list(validated_relevant_keys_set))
+        final_key_defs = {} # Definitions map for THIS tracker (internal + relevant VALID foreign)
+        for k_str in relevant_keys_for_grid: # Iterate only validated keys
+             # We know the key exists in the input map now, find its info again
+             info = next((info for path, info in path_to_key_info.items() if info.key_string == k_str), None)
+             if info: # Should always find info here now
+                  final_key_defs[k_str] = info.norm_path
+             # else: # This case should no longer happen
+             #      final_key_defs[k_str] = "PATH_ERROR_POST_VALIDATION"
+             #      logger.error(f"Logic Error: Key '{k_str}' passed validation but path not found.")
 
         logger.info(f"Mini tracker update for module {module_key_string} ({os.path.basename(module_path)}). Grid keys: {len(relevant_keys_for_grid)}.")
 
-        # Filter suggestions: Keep only those relevant for this mini-tracker's grid.
+        # Filter suggestions: Keep only *validated* relevant for this mini-tracker's grid.
         # Relevant suggestions have:
         #   - Source internal to this module and not excluded.
         #   - Target relevant for this tracker's grid (internal or external) and not excluded.
         # This replaces the previous "foreign only" filtering.
         if raw_suggestions and file_to_module:
-            logger.debug(f"Filtering mini-tracker suggestions for application ({os.path.basename(output_file)})...")
-            # final_suggestions_to_apply initialized earlier
+            logger.debug(f"Filtering mini-tracker suggestions against final valid keys ({os.path.basename(output_file)})...")
+            filtered_suggestions_for_apply = defaultdict(list) # Create a new dict for filtered suggestions
             for src_key_str, deps in raw_suggestions.items():
-                 # --- REMOVE THIS LINE ---
-                 # if src_key_str not in internal_keys_set: continue
-                 # --- REMOVE THIS LINE ---
-
-                 # Need to get source path info regardless of internal/external for exclusion check
+                 # Check if source is valid and not excluded
                  source_info = next((info for info in path_to_key_info.values() if info.key_string == src_key_str), None)
-                 src_path = source_info.norm_path if source_info else None
+                 if not source_info or source_info.norm_path in all_excluded_abs: continue
+                 # Add source to final_suggestions_to_apply only if it's in the final grid keys
+                 if src_key_str not in relevant_keys_for_grid: continue
 
-                 # Skip if source is excluded (check even if source is foreign)
-                 if not src_path or src_path in all_excluded_abs:
-                     # logger.debug(f"Mini filter: Skipping excluded source {src_key_str}")
-                     continue
+                 valid_targets_for_source = []
                  for target_key_str, dep_char in deps:
-                     # Only consider suggestions WHERE THE TARGET is relevant for this tracker's grid
-                     if target_key_str not in relevant_keys_for_grid:
-                         # logger.debug(f"Mini filter: Skipping target {target_key_str} not relevant for grid.")
-                         continue
-                     # Ignore self-dependencies or placeholder suggestions during application
-                     if src_key_str == target_key_str or dep_char == PLACEHOLDER_CHAR:
-                         continue
-
-                     # Find path/info for target key string from GLOBAL map to check exclusion
+                     # Check if target is valid for the final grid and not excluded
+                     if target_key_str not in relevant_keys_for_grid: continue
+                     if src_key_str == target_key_str or dep_char == PLACEHOLDER_CHAR: continue
                      target_info = next((info for info in path_to_key_info.values() if info.key_string == target_key_str), None)
-                     if not target_info:
-                         logger.warning(f"Mini filter: No path info for target key {target_key_str}. Cannot check exclusion. Adding suggestion.")
-                         final_suggestions_to_apply[src_key_str].append((target_key_str, dep_char))
-                         continue
+                     # Path should exist if key is in relevant_keys_for_grid, but check defensively
+                     if not target_info or target_info.norm_path in all_excluded_abs: continue
+                     valid_targets_for_source.append((target_key_str, dep_char))
 
-                     target_path = target_info.norm_path
-                     # Skip if the target is excluded
-                     if target_path in all_excluded_abs:
-                         # logger.debug(f"Mini filter: Skipping excluded target {target_key_str} ({target_path})")
-                         continue
-
-                     # If source isn't excluded, and target is relevant & non-excluded, add the suggestion.
-                     # logger.debug(f"Mini filter: Adding suggestion {src_key_str} -> {target_key_str} ('{dep_char}')")
-                     final_suggestions_to_apply[src_key_str].append((target_key_str, dep_char)) # Add directly
+                 if valid_targets_for_source:
+                     filtered_suggestions_for_apply[src_key_str].extend(valid_targets_for_source)
+            logger.debug(f"Mini filter: Adding suggestion {src_key_str} -> {target_key_str} ('{dep_char}')")
+            final_suggestions_to_apply = filtered_suggestions_for_apply # Replace original with filtered
 
     else:
         raise ValueError(f"Unknown tracker type: {tracker_type}")
@@ -1249,156 +1262,103 @@ def export_tracker(tracker_path: str, output_format: str = "json", output_path: 
     except ImportError as e: msg = f"Error exporting tracker: Missing library for format '{output_format}' - {str(e)}"; logger.error(msg); return msg
     except Exception as e: msg = f"Error exporting tracker: Unexpected error - {str(e)}"; logger.exception(msg); return msg
 
-# --- Remove File from Tracker ---
-# <<< *** MODIFIED SIGNATURE AND LOGIC *** >>>
-def remove_file_from_tracker(output_file: str, file_to_remove: str, path_to_key_info: Dict[str, KeyInfo]):
-    """Removes a file's key and row/column from the tracker using path_to_key_info. Invalidates relevant caches."""
-    output_file = normalize_path(output_file)
-    file_to_remove_norm = normalize_path(file_to_remove)
-
-    if not os.path.exists(output_file): logger.error(f"Tracker file '{output_file}' not found for removal."); raise FileNotFoundError(f"Tracker file '{output_file}' not found.")
-
-    logger.info(f"Attempting to remove file '{file_to_remove_norm}' from tracker '{output_file}'")
-    backup_tracker_file(output_file)
-
-    lines = []
-    try:
-        with open(output_file, "r", encoding="utf-8") as f: lines = f.readlines()
-    except Exception as e: logger.error(f"Failed to read tracker file {output_file} for removal: {e}", exc_info=True); raise IOError(f"Failed to read tracker file {output_file}: {e}") from e
-
-    # Read existing data
-    existing_key_defs = _read_existing_keys(lines)
-    existing_grid = _read_existing_grid(lines)
-
-    # Find the key to remove using the GLOBAL path_to_key_info map
-    key_to_remove = get_key_string_from_path(file_to_remove_norm, path_to_key_info)
-
-    # Also check if the key actually exists in *this* tracker's definitions
-    if key_to_remove is None or key_to_remove not in existing_key_defs:
-        logger.warning(f"File '{file_to_remove_norm}' (Key: {key_to_remove or 'Not Found Globally'}) not found in tracker definitions '{output_file}'. No changes made.")
-        return
-
-    logger.info(f"Found key '{key_to_remove}' for file '{file_to_remove_norm}'. Proceeding with removal from '{os.path.basename(output_file)}'.")
-
-    # --- Prepare updated data ---
-    final_key_defs = {k: v for k, v in existing_key_defs.items() if k != key_to_remove}
-    # <<< *** MODIFIED SORTING *** >>>
-    final_sorted_keys_list = sort_key_strings_hierarchically(list(final_key_defs.keys()))
-
-    final_last_key_edit = f"Removed key: {key_to_remove} ({os.path.basename(file_to_remove_norm)})"
-    final_last_grid_edit = f"Grid adjusted for removal of key: {key_to_remove}"
-
-    # Rebuild grid without the removed key/row/column
-    final_grid = {}
-    # <<< *** MODIFIED SORTING *** >>>
-    old_keys_list = sort_key_strings_hierarchically(list(existing_key_defs.keys()))
-    try:
-        idx_to_remove = old_keys_list.index(key_to_remove)
-    except ValueError:
-        logger.error(f"Key '{key_to_remove}' not found in old sorted list during removal grid update. Using filtered grid (might be incomplete).")
-        final_grid = {k:v for k,v in existing_grid.items() if k != key_to_remove}
-    else:
-        for old_row_key, compressed_row in existing_grid.items():
-             if old_row_key != key_to_remove: # Keep rows not being removed
-                 try:
-                     decomp_row = list(decompress(compressed_row))
-                     if len(decomp_row) == len(old_keys_list):
-                          # Remove the character at the removed key's index
-                          new_decomp_row_list = decomp_row[:idx_to_remove] + decomp_row[idx_to_remove+1:]
-                          final_grid[old_row_key] = compress("".join(new_decomp_row_list))
-                     else: # Re-initialize row if length mismatch
-                          logger.warning(f"Removal: Row length mismatch for key '{old_row_key}'. Re-initializing.")
-                          row_list = [PLACEHOLDER_CHAR] * len(final_sorted_keys_list)
-                          if old_row_key in final_sorted_keys_list: row_list[final_sorted_keys_list.index(old_row_key)] = DIAGONAL_CHAR
-                          final_grid[old_row_key] = compress("".join(row_list))
-                 except Exception as e: # Re-initialize row if decompression error
-                      logger.warning(f"Removal: Error decompressing row for key '{old_row_key}': {e}. Re-initializing.")
-                      row_list = [PLACEHOLDER_CHAR] * len(final_sorted_keys_list)
-                      if old_row_key in final_sorted_keys_list: row_list[final_sorted_keys_list.index(old_row_key)] = DIAGONAL_CHAR
-                      final_grid[old_row_key] = compress("".join(row_list))
-
-    # --- Write updated file ---
-    if write_tracker_file(output_file, final_key_defs, final_grid, final_last_key_edit, final_last_grid_edit):
-         logger.info(f"Successfully removed key '{key_to_remove}' and file '{file_to_remove_norm}' from tracker '{output_file}'")
-    else:
-         logger.error(f"Failed to write updated tracker file after removal: {output_file}")
-         # Consider restoring backup? Or raise error? For now, just log the failure.
-         raise IOError(f"Failed to write updated tracker file {output_file} after removal.")
-
+# --- remove_key_from_tracker (REFACTORED to use update_tracker) ---
 def remove_key_from_tracker(output_file: str, key_to_remove: str):
     """
-    Removes a key string and its corresponding row/column from a specific tracker file.
-    Invalidates relevant caches. Operates locally on the provided file and key string.
+    Removes a key string and its row/column from a tracker by calling update_tracker
+    with a modified global key map copy where the key's path is excluded.
 
     Args:
         output_file: Path to the tracker file.
         key_to_remove: The key string to remove from this tracker.
+
+    Raises:
+        FileNotFoundError: If the tracker file doesn't exist.
+        ValueError: If the key to remove is not found locally in the tracker.
+        IOError: If writing the updated file fails (via update_tracker).
+        Exception: For other unexpected errors during processing or update_tracker call.
     """
     output_file = normalize_path(output_file)
+    logger.info(f"Attempting removal of key '{key_to_remove}' from tracker '{output_file}' via update_tracker.")
 
-    if not os.path.exists(output_file): logger.error(f"Tracker file '{output_file}' not found for removal."); raise FileNotFoundError(f"Tracker file '{output_file}' not found.")
+    # 1. Validate File Existence and Read Local Keys
+    if not os.path.exists(output_file):
+        logger.error(f"Tracker file '{output_file}' not found for removal.")
+        raise FileNotFoundError(f"Tracker file '{output_file}' not found.")
 
-    logger.info(f"Attempting to remove key '{key_to_remove}' from tracker '{output_file}'")
-    backup_tracker_file(output_file) # Ensure backup function call is present
+    # Read only keys needed for initial validation and path lookup
+    # Use read_tracker_file which leverages caching
+    tracker_data = read_tracker_file(output_file)
+    if not tracker_data or not tracker_data.get("keys"):
+        # This case might mean an empty or malformed tracker.
+        # If the file exists but keys can't be read, maybe raise an error?
+        logger.error(f"Could not read keys from tracker file: {output_file}")
+        raise ValueError(f"Could not read keys from tracker file: {output_file}")
 
-    lines = []
-    try:
-        with open(output_file, "r", encoding="utf-8") as f: lines = f.readlines()
-    except Exception as e: logger.error(f"Failed to read tracker file {output_file} for removal: {e}", exc_info=True); raise IOError(f"Failed to read tracker file {output_file}: {e}") from e
+    local_keys = tracker_data["keys"]
+    if key_to_remove not in local_keys:
+        logger.warning(f"Key '{key_to_remove}' not found in the definitions of tracker '{output_file}'. No update needed.")
+        # Changed from raising ValueError to returning gracefully, as the key isn't there.
+        # Alternatively, could still raise ValueError if the command expects the key to exist.
+        # Let's stick with raising ValueError for now to match previous behavior.
+        raise ValueError(f"Key '{key_to_remove}' not found in tracker '{output_file}'.")
 
-    existing_key_defs = _read_existing_keys(lines)
-    existing_grid = _read_existing_grid(lines)
+    # Get the path associated with the key *in this specific tracker*
+    path_removed = local_keys.get(key_to_remove)
+    if not path_removed:
+        logger.error(f"Internal inconsistency: Key '{key_to_remove}' found in keys map but has no path.")
+        raise ValueError(f"Could not determine path for key '{key_to_remove}' in {output_file}.")
+    logger.info(f"Key '{key_to_remove}' corresponds to path '{path_removed}' in this tracker.")
 
-    if key_to_remove not in existing_key_defs:
-        logger.warning(f"Key '{key_to_remove}' not found in tracker definitions '{output_file}'. No changes made.")
-        return # Exit if key not found locally
+    # --- Backup original file before calling update_tracker ---
+    backup_tracker_file(output_file)
 
-    path_removed = existing_key_defs.get(key_to_remove, "Unknown Path")
-    logger.info(f"Found key '{key_to_remove}' (Path: {path_removed}). Proceeding with removal from '{os.path.basename(output_file)}'.")
+    # 2. Load Global Map
+    # This function handles errors and exits if map not found
+    global_path_to_key_info = load_global_key_map() # Assume this exists or script exits
 
-    # --- Prepare updated data ---
-    final_key_defs = {k: v for k, v in existing_key_defs.items() if k != key_to_remove}
-    final_sorted_keys_list = sort_key_strings_hierarchically(list(final_key_defs.keys())) # Use standard sort
-
-    final_last_key_edit = f"Removed key: {key_to_remove} (Path: {path_removed})"
-    final_last_grid_edit = f"Grid adjusted for removal of key: {key_to_remove}"
-
-    # Rebuild grid without the removed key/row/column
-    final_grid = {}
-    old_keys_list = sort_key_strings_hierarchically(list(existing_key_defs.keys())) # Use standard sort
-    try:
-        idx_to_remove = old_keys_list.index(key_to_remove)
-    except ValueError:
-        logger.error(f"Key '{key_to_remove}' not found in old sorted list during grid update. Using filtered grid (might be incomplete).")
-        final_grid = {k:v for k,v in existing_grid.items() if k != key_to_remove}
+    # 3. Create Modified Map Copy (Remove target path entry)
+    modified_path_to_key_info = global_path_to_key_info.copy()
+    if path_removed in modified_path_to_key_info:
+        del modified_path_to_key_info[path_removed]
+        logger.debug(f"Removed path '{path_removed}' from the in-memory global map copy for update_tracker.")
     else:
-        for old_row_key, compressed_row in existing_grid.items():
-             if old_row_key != key_to_remove:
-                 try:
-                     decomp_row = list(decompress(compressed_row))
-                     if len(decomp_row) == len(old_keys_list):
-                          new_decomp_row_list = decomp_row[:idx_to_remove] + decomp_row[idx_to_remove+1:]
-                          final_grid[old_row_key] = compress("".join(new_decomp_row_list))
-                     else: # Re-initialize row if length mismatch
-                          logger.warning(f"Removal: Row length mismatch for key '{old_row_key}'. Re-initializing.")
-                          row_list = [PLACEHOLDER_CHAR] * len(final_sorted_keys_list)
-                          if old_row_key in final_sorted_keys_list: row_list[final_sorted_keys_list.index(old_row_key)] = DIAGONAL_CHAR
-                          final_grid[old_row_key] = compress("".join(row_list))
-                 except Exception as e: # Re-initialize row if decompression error
-                      logger.warning(f"Removal: Error decompressing row for key '{old_row_key}': {e}. Re-initializing.")
-                      row_list = [PLACEHOLDER_CHAR] * len(final_sorted_keys_list)
-                      if old_row_key in final_sorted_keys_list: row_list[final_sorted_keys_list.index(old_row_key)] = DIAGONAL_CHAR
-                      final_grid[old_row_key] = compress("".join(row_list))
+        logger.warning(f"Path '{path_removed}' (from key '{key_to_remove}' in {output_file}) not found as a key in the loaded global map. Proceeding, but this might indicate an inconsistency.")
 
-    # --- Write updated file ---
-    if write_tracker_file(output_file, final_key_defs, final_grid, final_last_key_edit, final_last_grid_edit):
-         logger.info(f"Successfully removed key '{key_to_remove}' from tracker '{output_file}'")
-         # Invalidate cache for this tracker
-         invalidate_dependent_entries('tracker_data', f"tracker_data:{output_file}:.*")
-         invalidate_dependent_entries('grid_decompress', '.*'); invalidate_dependent_entries('grid_validation', '.*'); invalidate_dependent_entries('grid_dependencies', '.*')
+    # 4. Prepare Arguments for update_tracker
+    is_mini_tracker = output_file.endswith("_module.md")
+    tracker_type = "mini" if is_mini_tracker else ("doc" if "doc_tracker.md" in output_file else "main")
 
-    else:
-         logger.error(f"Failed to write updated tracker file after removal: {output_file}")
-         raise IOError(f"Failed to write updated tracker file {output_file} after removal.")
-    
+    # Generate file_to_module map (use original map is fine)
+    file_to_module_map = {
+        info.norm_path: info.parent_path
+        for info in global_path_to_key_info.values() # Use original is safe
+        if not info.is_directory and info.parent_path
+    }
+
+    # 5. Call update_tracker
+    try:
+        logger.info(f"Calling update_tracker for {output_file} with key '{key_to_remove}' effectively excluded.")
+        # We need to call the update_tracker function defined within this same file (tracker_io.py)
+        # Ensure it's callable directly or imported appropriately if it were in a different module.
+        update_tracker(
+            output_file_suggestion=output_file,
+            # Pass the MODIFIED map where the target key's path is absent
+            path_to_key_info=modified_path_to_key_info,
+            tracker_type=tracker_type,
+            suggestions=None, # No suggestions being applied
+            file_to_module=file_to_module_map,
+            new_keys=None, # No new keys being introduced globally
+            force_apply_suggestions=False # Not applying suggestions
+        )
+        logger.info(f"update_tracker completed successfully for removing key '{key_to_remove}' from '{output_file}'.")
+        # Invalidation is handled within update_tracker
+        # No explicit return value needed, exceptions signal failure.
+
+    except Exception as e:
+        logger.error(f"update_tracker failed during key removal for {output_file}: {e}", exc_info=True)
+        # Re-raise the exception so the handler in dependency_processor can catch it
+        # Potentially wrap in a more specific error type if desired.
+        raise Exception(f"Failed to update tracker {output_file} during key removal: {e}") from e
+
 # --- End of tracker_io.py ---

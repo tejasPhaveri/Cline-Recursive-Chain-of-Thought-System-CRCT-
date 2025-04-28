@@ -52,7 +52,7 @@
 
 **Procedure**:
 
-1. **Review and Create HDTA Documentation (Mandatory Firstazelcast: **Action**: Review all existing HDTA documents (`system_manifest.md`, `*_module.md`, `implementation_plan_*.md`, `*.md` Task Instructions) for accuracy and completeness.
+1. **Review and Create HDTA Documentation Mandatory **Action**: Review all existing HDTA documents (`system_manifest.md`, `*_module.md`, `implementation_plan_*.md`, `*.md` Task Instructions) for accuracy and completeness.
       * **For Each Document**:
          * **A. Existence Check**: Verify if the document exists for each required HDTA tier (System Manifest, Domain Modules, Implementation Plans, Task Instructions).
             * If missing: State "File `{file_path}` does not exist. Creating using template." Use the appropriate template from `cline_docs/templates/` (e.g., `system_manifest_template.md`, `module_template.md`, `implementation_plan_template.md`, `task_template.md`) and create the document with all required sections filled.
