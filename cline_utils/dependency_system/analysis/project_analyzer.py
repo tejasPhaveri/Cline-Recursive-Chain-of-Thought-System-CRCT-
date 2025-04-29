@@ -6,14 +6,18 @@ import json
 import os
 from typing import Any, Dict, Optional, List, Tuple
 from cline_utils.dependency_system.core.dependency_grid import decompress
-from cline_utils.dependency_system.io.tracker_io import read_tracker_file, get_tracker_path, update_tracker
+# <<< MODIFIED IMPORT: Import tracker_io module >>>
+from cline_utils.dependency_system.io import tracker_io
+# <<< MODIFIED IMPORT: Import key_manager module >>>
+from cline_utils.dependency_system.core import key_manager
 import uuid
 import logging
 from cline_utils.dependency_system.analysis.dependency_analyzer import analyze_file
 from cline_utils.dependency_system.utils.batch_processor import BatchProcessor, process_items
 from cline_utils.dependency_system.analysis.dependency_suggester import suggest_dependencies
 from cline_utils.dependency_system.analysis.embedding_manager import generate_embeddings
-from cline_utils.dependency_system.core.key_manager import get_key_from_path, generate_keys, validate_key, KeyInfo, KeyGenerationError, sort_keys
+# Remove direct import of generate_keys, KeyInfo etc. Use key_manager.generate_keys etc.
+# from cline_utils.dependency_system.core.key_manager import get_key_from_path, generate_keys, validate_key, KeyInfo, KeyGenerationError, sort_keys
 from cline_utils.dependency_system.utils.cache_manager import cached, file_modified, clear_all_caches
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
 from cline_utils.dependency_system.utils.path_utils import is_subpath, normalize_path, get_project_root
@@ -41,19 +45,15 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     logger.info(f"Starting project analysis in directory: {project_root}")
 
     analyzer_batch_processor = BatchProcessor()
-    # Clear relevant caches if forcing re-analysis (more targeted cache clearing might be needed)
+    # Clear relevant caches if forcing re-analysis
     if force_analysis:
         logger.info("Force analysis requested. Clearing all caches.")
         clear_all_caches()
 
-    results = {
-        "status": "success",
-        "message": "",
-        "tracker_initialization": {},
-        "embedding_generation": {},
-        "dependency_suggestion": {},
-        "tracker_update": {},
-        "file_analysis": {} # Store results keyed by normalized absolute path
+    results = { # Initialize results dict
+        "status": "success", "message": "", "tracker_initialization": {},
+        "embedding_generation": {}, "dependency_suggestion": {},
+        "tracker_update": {}, "file_analysis": {}
     }
 
     # --- Exclusion Setup ---
@@ -61,17 +61,12 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     excluded_paths_rel = config.get_excluded_paths()
     excluded_extensions = set(config.get_excluded_extensions())
     excluded_file_patterns = config.config.get("excluded_file_patterns", [])
-    
     excluded_dirs_abs = {normalize_path(os.path.join(project_root, p)) for p in excluded_dirs_rel}
     excluded_paths_abs = {normalize_path(os.path.join(project_root, p)) for p in excluded_paths_rel}
     all_excluded_paths_abs = excluded_dirs_abs.union(excluded_paths_abs)
-
-    # Early exit if project root itself is excluded
     norm_project_root = normalize_path(project_root)
-    if any(norm_project_root == excluded_path or norm_project_root.startswith(excluded_path + os.sep) # Use os.sep
-           for excluded_path in all_excluded_paths_abs):
-        logger.info(f"Skipping analysis of excluded project root: {project_root}")
-        results["status"] = "skipped"; results["message"] = "Project root is excluded"; return results
+    if any(norm_project_root == excluded_path or norm_project_root.startswith(excluded_path + os.sep) for excluded_path in all_excluded_paths_abs):
+        logger.info(f"Skipping analysis of excluded project root: {project_root}"); results["status"] = "skipped"; results["message"] = "Project root is excluded"; return results
 
     # --- Root Directories Setup ---
     code_root_directories_rel = config.get_code_root_directories()
@@ -93,43 +88,46 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
     abs_doc_roots = {normalize_path(os.path.join(project_root, r)) for r in doc_directories_rel}
     abs_all_roots = {normalize_path(os.path.join(project_root, r)) for r in all_roots_rel}
 
+    # <<< START NEW LOGIC: Check for pre-existing _old.json >>>
+    old_map_existed_before_gen = False
+    try:
+        # Determine the expected path for the old map file RELATIVE to key_manager.py
+        # Use the imported key_manager module to find its location
+        key_manager_dir = os.path.dirname(os.path.abspath(key_manager.__file__))
+        old_map_path = normalize_path(os.path.join(key_manager_dir, key_manager.OLD_GLOBAL_KEY_MAP_FILENAME))
+        old_map_existed_before_gen = os.path.exists(old_map_path)
+        if old_map_existed_before_gen:
+            logger.info(f"Found existing '{key_manager.OLD_GLOBAL_KEY_MAP_FILENAME}' before key generation. Grid migration will prioritize it.")
+        else:
+            logger.info(f"'{key_manager.OLD_GLOBAL_KEY_MAP_FILENAME}' not found before key generation. Grid migration will use tracker definitions as fallback.")
+    except Exception as path_err:
+        logger.error(f"Error determining path or checking existence of old key map file: {path_err}. Assuming it didn't exist.")
+        old_map_existed_before_gen = False # Default to false on error
+    # <<< END NEW LOGIC >>>
 
     # --- Key Generation ---
-    logger.info("Generating keys...")
-    path_to_key_info: Dict[str, KeyInfo] = {} # Initialize map
-    newly_generated_keys: List[KeyInfo] = [] # Initialize list
+    logger.info("Generating/Regenerating keys...")
+    path_to_key_info: Dict[str, key_manager.KeyInfo] = {} # Use qualified type
+    newly_generated_keys: List[key_manager.KeyInfo] = [] # Use qualified type
 
     try:
-        # <<< *** MODIFIED CALL *** >>>
-        # Pass the SORTED relative roots and the precomputed absolute excluded paths
-        path_to_key_info, newly_generated_keys = generate_keys(
-            all_roots_rel, # Pass the sorted list
-            # Pass exclusions directly if generate_keys handles fetching them internally,
-            # otherwise pass the computed sets as before. Assuming generate_keys uses config:
-            excluded_dirs=excluded_dirs_rel, # Pass rel paths/names
+        # Call generate_keys using the module reference
+        path_to_key_info, newly_generated_keys = key_manager.generate_keys(
+            all_roots_rel,
+            excluded_dirs=excluded_dirs_rel,
             excluded_extensions=excluded_extensions,
-            precomputed_excluded_paths=all_excluded_paths_abs # Pass computed absolute paths
+            precomputed_excluded_paths=all_excluded_paths_abs
         )
         results["tracker_initialization"]["key_generation"] = "success"
         logger.info(f"Generated {len(path_to_key_info)} keys for {len(path_to_key_info)} files/dirs.")
-        if newly_generated_keys:
-            # Log count, maybe sample? Full list might be too long.
-            logger.info(f"Assigned {len(newly_generated_keys)} new keys.")
-            # Example: Log first 5 new key strings:
-            # logger.debug(f"Sample new keys: {', '.join([k.key_string for k in newly_generated_keys[:5]])}")
-
-    # <<< *** ADDED ERROR HANDLING *** >>>
-    except KeyGenerationError as kge:
+        if newly_generated_keys: logger.info(f"Assigned {len(newly_generated_keys)} new keys.")
+    except key_manager.KeyGenerationError as kge: # Use qualified type
         results["status"] = "error"; results["message"] = f"Key generation failed: {kge}"; logger.critical(results["message"]); return results
     except Exception as e:
         results["status"] = "error"; results["message"] = f"Key generation failed unexpectedly: {e}"; logger.exception(results["message"]); return results
 
-    # <<< *** REMOVED *** >>>
-    # path_to_key = {v: k for k, v in key_map.items()} # No longer needed / possible directly
-
     # --- Create file_to_module mapping (Adapted for path_to_key_info) ---
     # Maps normalized absolute file path -> normalized absolute parent directory path (module path)
-    # <<< *** NEW BLOCK *** >>>
     logger.info("Creating file-to-module mapping...")
     file_to_module: Dict[str, str] = {}
     for key_info in path_to_key_info.values():
@@ -220,7 +218,6 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
             elif "skipped" in analysis_result: skipped_count += 1
             else: file_analysis_results[file_path_abs] = analysis_result; analyzed_count += 1
         else: logger.warning(f"Analysis returned no result for {file_path_abs}"); error_count += 1
-
     results["file_analysis"] = file_analysis_results
     logger.info(f"File analysis complete. Analyzed: {analyzed_count}, Skipped: {skipped_count}, Errors: {error_count}")
 
@@ -252,15 +249,9 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
 
     logger.info(f"File-to-module mapping created with {len(file_to_module)} entries.")
 
-    # Note: The abs_code_roots and abs_doc_roots variables might still be needed elsewhere
-    # (e.g., for determining which modules go into the main tracker), but they are
-    # no longer needed for generating this specific file_to_module map.
-
-
     # --- Embedding generation ---
     logger.info("Starting embedding generation...")
     try:
-        # <<< *** MODIFIED CALL *** >>>
         # Pass path_to_key_info instead of key_map
         success = generate_embeddings(all_roots_rel, path_to_key_info, force=force_embeddings)
         results["embedding_generation"]["status"] = "success" if success else "partial_failure"
@@ -271,7 +262,6 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
         results["status"] = "error" # Upgrade status to error if embedding process fails critically
         results["message"] = f"Embedding generation process failed critically: {e}"
         logger.exception(results["message"]); return results
-
 
     # --- Dependency Suggestion ---
     logger.info("Starting dependency suggestion...")
@@ -288,14 +278,12 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
         # Use list of keys corresponding to analyzed files
         analyzed_file_paths = list(file_analysis_results.keys())
         for file_path_abs in analyzed_file_paths:
-            # <<< *** MODIFIED key lookup *** >>>
             file_key_info = path_to_key_info.get(file_path_abs)
             if not file_key_info:
                 logger.warning(f"No key info found for analyzed file {file_path_abs}, skipping suggestion.")
                 continue
             file_key_string = file_key_info.key_string # Get the actual key string
 
-            # <<< *** MODIFIED CALL *** >>>
             # Pass path_to_key_info instead of key_map
             suggestions_for_file = suggest_dependencies(
                 file_path_abs,
@@ -383,99 +371,94 @@ def analyze_project(force_analysis: bool = False, force_embeddings: bool = False
 
         results["dependency_suggestion"]["status"] = "success"
         logger.info("Dependency suggestion combining completed.")
+    except Exception as e:
+        results["status"] = "error"; results["message"] = f"Dependency suggestion failed critically: {e}"; logger.exception(results["message"]); return results
 
+    # --- Update Trackers ---
+    logger.info("Updating trackers...")
+    # --- Update Mini Trackers FIRST ---
+    results["tracker_update"]["mini"] = {}
+    mini_tracker_paths_updated = set() # Track paths to avoid duplicates if structure overlaps
 
-        # --- Update Trackers ---
-        logger.info("Updating trackers...")
+    potential_mini_tracker_dirs: Dict[str, key_manager.KeyInfo] = {}
+    for code_root_abs in abs_code_roots:
+        for path, key_info in path_to_key_info.items():
+            if key_info.is_directory and key_info.parent_path == code_root_abs:
+               potential_mini_tracker_dirs[path] = key_info
+               # Also consider the code root itself if it contains files directly
+            elif key_info.is_directory and path == code_root_abs:
+                 potential_mini_tracker_dirs[path] = key_info
 
-        # --- Update Mini Trackers FIRST ---
-        results["tracker_update"]["mini"] = {}
-        mini_tracker_paths_updated = set() # Track paths to avoid duplicates if structure overlaps
+    logger.info(f"Identified {len(potential_mini_tracker_dirs)} potential directories for mini-trackers.")
 
-        # <<< *** MAJOR CHANGE HERE *** >>>
-        # We need the list of modules (directories) that should have mini-trackers.
-        # This requires filtering path_to_key_info based on config (e.g., only dirs under code_roots)
-        # Let's assume a simple filter for now: all directories directly under code roots.
-        # This filtering logic might need refinement based on exact requirements.
-        potential_mini_tracker_dirs: Dict[str, KeyInfo] = {}
-        for code_root_abs in abs_code_roots:
-             for path, key_info in path_to_key_info.items():
-                  if key_info.is_directory and key_info.parent_path == code_root_abs:
-                       potential_mini_tracker_dirs[path] = key_info
-                  # Also consider the code root itself if it contains files directly
-                  elif key_info.is_directory and path == code_root_abs:
-                       potential_mini_tracker_dirs[path] = key_info
-
-        logger.info(f"Identified {len(potential_mini_tracker_dirs)} potential directories for mini-trackers.")
-
-        # Iterate through the identified module paths
-        for norm_module_path, module_key_info in potential_mini_tracker_dirs.items():
-            module_key_string = module_key_info.key_string # Get key string for logging if needed
-            # Check if directory is NOT empty before trying to update/create tracker
-            if os.path.isdir(norm_module_path) and not _is_empty_dir(norm_module_path):
-                if norm_module_path in mini_tracker_paths_updated: continue # Skip if already processed
-
-                mini_tracker_path = get_tracker_path(project_root, tracker_type="mini", module_path=norm_module_path)
-                logger.info(f"Updating mini tracker for module '{norm_module_path}' (Key: {module_key_string}) at: {mini_tracker_path}")
-                mini_tracker_paths_updated.add(norm_module_path)
-                try:
-                    # Update the mini-tracker. Suggestions are applied internally by update_tracker.
-                    # Pass the GLOBAL suggestions here. update_tracker will filter them based on the module.
-                    update_tracker(
-                        mini_tracker_path,
-                        path_to_key_info, # Pass the main map
-                        tracker_type="mini",
-                        suggestions=all_suggestions, # Pass combined & reciprocal suggestions (keyed by key strings)
-                        file_to_module=file_to_module,
-                        new_keys=newly_generated_keys # Pass list of KeyInfo objects
-                    )
-                    results["tracker_update"]["mini"][norm_module_path] = "success"
-                except Exception as mini_err:
-                     logger.error(f"Error updating mini tracker {mini_tracker_path}: {mini_err}", exc_info=True)
-                     results["tracker_update"]["mini"][norm_module_path] = "failure"
-                     results["status"] = "warning"
-            elif os.path.isdir(norm_module_path):
-                logger.debug(f"Skipping mini-tracker update for empty directory: {norm_module_path}")
-            # else: logger.warning(...) # Path check happens implicitly
-
-        # --- Update Doc Tracker ---
-        # Assuming doc tracker logic remains similar, just pass path_to_key_info
-        doc_tracker_path = get_tracker_path(project_root, tracker_type="doc") if doc_directories_rel else None
-        if doc_tracker_path:
-            logger.info(f"Updating doc tracker: {doc_tracker_path}")
+    # Iterate through the identified module paths
+    for norm_module_path, module_key_info in potential_mini_tracker_dirs.items():
+        module_key_string = module_key_info.key_string # Get key string for logging if needed
+        # Check if directory is NOT empty before trying to update/create tracker
+        if os.path.isdir(norm_module_path) and not _is_empty_dir(norm_module_path):
+            if norm_module_path in mini_tracker_paths_updated: continue # Skip if already processed
+            mini_tracker_path = tracker_io.get_tracker_path(project_root, tracker_type="mini", module_path=norm_module_path)
+            logger.info(f"Updating mini tracker for module '{norm_module_path}' (Key: {module_key_string}) at: {mini_tracker_path}")
+            mini_tracker_paths_updated.add(norm_module_path)
             try:
-                 # <<< *** MODIFIED CALL *** >>>
-                update_tracker(
-                    doc_tracker_path,
-                    path_to_key_info, # Pass the main map
-                    "doc",
-                    suggestions=all_suggestions,
+                # Update the mini-tracker. Suggestions are applied internally by update_tracker.
+                # Pass the GLOBAL suggestions here. update_tracker will filter them based on the module.
+                tracker_io.update_tracker(
+                    output_file_suggestion=mini_tracker_path,
+                    path_to_key_info=path_to_key_info, # Pass the main map
+                    tracker_type="mini",
+                    suggestions=all_suggestions, # Pass combined & reciprocal suggestions (keyed by key strings)
                     file_to_module=file_to_module,
-                    new_keys=newly_generated_keys # Pass list of KeyInfo objects
+                    new_keys=newly_generated_keys, # Pass list of KeyInfo objects
+                    force_apply_suggestions=False,
+                    use_old_map_for_migration=old_map_existed_before_gen
                 )
-                results["tracker_update"]["doc"] = "success"
-            except Exception as doc_err:
-                logger.error(f"Error updating doc tracker {doc_tracker_path}: {doc_err}", exc_info=True)
-                results["tracker_update"]["doc"] = "failure"; results["status"] = "warning"
+                results["tracker_update"]["mini"][norm_module_path] = "success"
+            except Exception as mini_err:
+                 logger.error(f"Error updating mini tracker {mini_tracker_path}: {mini_err}", exc_info=True)
+                 results["tracker_update"]["mini"][norm_module_path] = "failure"; results["status"] = "warning"
+        elif os.path.isdir(norm_module_path): logger.debug(f"Skipping mini-tracker update for empty directory: {norm_module_path}")
 
-        # --- Update Main Tracker LAST (using aggregation) ---
-        main_tracker_path = get_tracker_path(project_root, tracker_type="main")
-        logger.info(f"Updating main tracker (with aggregation): {main_tracker_path}")
+    # --- Update Doc Tracker ---
+    doc_tracker_path = tracker_io.get_tracker_path(project_root, tracker_type="doc") if doc_directories_rel else None
+    if doc_tracker_path:
+        logger.info(f"Updating doc tracker: {doc_tracker_path}")
         try:
-            # update_tracker for "main" will call the aggregation function internally.
-            # Aggregation needs path_to_key_info and file_to_module.
-            update_tracker(
-                main_tracker_path,
-                path_to_key_info, # Pass the main map
-                "main",
-                suggestions=None, # Aggregation happens internally
-                file_to_module=file_to_module, # Needed by aggregation
-                new_keys=newly_generated_keys # Pass list of KeyInfo objects
+            tracker_io.update_tracker(
+                output_file_suggestion=doc_tracker_path,
+                path_to_key_info=path_to_key_info, # Pass the main map
+                tracker_type="doc",
+                suggestions=all_suggestions,
+                file_to_module=file_to_module,
+                new_keys=newly_generated_keys,
+                force_apply_suggestions=False,
+                use_old_map_for_migration=old_map_existed_before_gen
             )
-            results["tracker_update"]["main"] = "success"
-        except Exception as main_err:
-            logger.error(f"Error updating main tracker {main_tracker_path}: {main_err}", exc_info=True)
-            results["tracker_update"]["main"] = "failure"; results["status"] = "warning"
+            results["tracker_update"]["doc"] = "success"
+        except Exception as doc_err:
+            logger.error(f"Error updating doc tracker {doc_tracker_path}: {doc_err}", exc_info=True)
+            results["tracker_update"]["doc"] = "failure"; results["status"] = "warning"
+
+    # --- Update Main Tracker LAST (using aggregation) ---
+    main_tracker_path = tracker_io.get_tracker_path(project_root, tracker_type="main")
+    logger.info(f"Updating main tracker (with aggregation): {main_tracker_path}")
+    try:
+        # update_tracker for "main" will call the aggregation function internally.
+        # Aggregation needs path_to_key_info and file_to_module.
+        tracker_io.update_tracker(
+            output_file_suggestion=main_tracker_path,
+            path_to_key_info=path_to_key_info, # Pass the main map
+            tracker_type="main",
+            suggestions=None, # Aggregation happens internally
+            file_to_module=file_to_module, # Needed by aggregation
+            new_keys=newly_generated_keys, # Pass list of KeyInfo objects
+            force_apply_suggestions=False,
+            use_old_map_for_migration=old_map_existed_before_gen
+        )
+        results["tracker_update"]["main"] = "success"
+    except Exception as main_err:
+        logger.error(f"Error updating main tracker {main_tracker_path}: {main_err}", exc_info=True)
+        results["tracker_update"]["main"] = "failure"; results["status"] = "warning"
 
     except Exception as e:
         results["status"] = "error" # Critical error during suggestions/updates

@@ -4,13 +4,14 @@
 Core module for key management.
 Handles key generation, validation, and sorting based on a hierarchical,
 contextual model with tier promotion for nested subdirectories.
-Persists the global key map to a file.
+Persists the global key map to a file and maintains the previous version.
 """
 
 import glob
 import os
 import re
 import json # Added for saving/loading map
+import shutil # Added for renaming
 from typing import Dict, List, Tuple, Optional, Set, NamedTuple
 from collections import defaultdict
 
@@ -45,7 +46,8 @@ ASCII_Z_LOWER = 122 # ASCII value for 'z'
 HIERARCHICAL_KEY_PATTERN = r'^[1-9]\d*[A-Z](?:[a-z](?:[1-9]\d*)?|[1-9]\d*)?$'
 # Pattern for splitting keys into sortable parts (numbers and non-numbers)
 KEY_PATTERN = r'\d+|\D+'
-GLOBAL_KEY_MAP_FILENAME = "global_key_map.json" # Define filename constant
+GLOBAL_KEY_MAP_FILENAME = "global_key_map.json"
+OLD_GLOBAL_KEY_MAP_FILENAME = "global_key_map_old.json" # <<< NEW
 
 class KeyGenerationError(ValueError):
     """Custom exception for key generation failures."""
@@ -88,6 +90,7 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
     Generate hierarchical, contextual keys for files and directories.
     Implements tier promotion (resetting dir letter to 'A') for nested subdirectories.
     Saves the resulting key map to a file alongside this script.
+    Manages current and previous global key map files.
     Uses ConfigManager for default exclusions if specific arguments are not provided.
 
     Args:
@@ -359,23 +362,33 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
     try:
         # Get the directory where this script (key_manager.py) resides
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        map_path = normalize_path(os.path.join(script_dir, GLOBAL_KEY_MAP_FILENAME))
+        current_map_path = normalize_path(os.path.join(script_dir, GLOBAL_KEY_MAP_FILENAME))
+        old_map_path = normalize_path(os.path.join(script_dir, OLD_GLOBAL_KEY_MAP_FILENAME))
+        os.makedirs(script_dir, exist_ok=True) # Ensure directory exists
 
-        # Ensure the directory exists (should always be true for script's own dir)
-        os.makedirs(script_dir, exist_ok=True)
+        # Step 1: Rename current to old (overwrite existing old if present)
+        if os.path.exists(current_map_path):
+            try:
+                # Use shutil.move for atomic rename where possible, handles overwrite
+                shutil.move(current_map_path, old_map_path)
+                logger.info(f"Renamed existing '{GLOBAL_KEY_MAP_FILENAME}' to '{OLD_GLOBAL_KEY_MAP_FILENAME}'.")
+            except OSError as rename_err:
+                logger.error(f"Failed to rename '{current_map_path}' to '{old_map_path}': {rename_err}. Proceeding to save new map.")
+                # Decide if this should be a critical error. For now, log and continue.
+        else:
+            logger.info(f"No existing '{GLOBAL_KEY_MAP_FILENAME}' found to rename.")
 
-        # Convert KeyInfo tuples to dictionaries for JSON serialization
+        # Step 2: Save the newly generated map to the current filename
         serializable_map = {path: info._asdict() for path, info in path_to_key_info.items()}
-
-        with open(map_path, 'w', encoding='utf-8') as f:
+        with open(current_map_path, 'w', encoding='utf-8') as f:
             json.dump(serializable_map, f, indent=2)
-        logger.info(f"Successfully saved global key map to: {map_path}")
+        logger.info(f"Successfully saved new global key map to: {current_map_path}")
     except IOError as e:
-        logger.error(f"I/O Error saving global key map to {map_path}: {e}", exc_info=True)
+        logger.error(f"I/O Error saving global key map to {current_map_path}: {e}", exc_info=True)
         # Decide if this should be a critical failure or just a warning
         raise KeyGenerationError(f"Failed to save global key map: {e}") from e
     except Exception as e:
-        logger.exception(f"Unexpected error saving global key map to {map_path}: {e}")
+        logger.exception(f"Unexpected error saving global key map to {current_map_path}: {e}")
         raise KeyGenerationError(f"Failed to save global key map: {e}") from e
 
     unique_new_keys = list(dict.fromkeys(newly_generated_keys).keys())
@@ -404,10 +417,7 @@ def load_global_key_map() -> Optional[Dict[str, KeyInfo]]:
         # Convert dictionary data back into KeyInfo objects
         path_to_key_info: Dict[str, KeyInfo] = {}
         for path, info_dict in loaded_data.items():
-            try:
-                # Ensure all expected fields are present before unpacking
-                # (Could add more robust validation if needed)
-                path_to_key_info[path] = KeyInfo(**info_dict)
+            try: path_to_key_info[path] = KeyInfo(**info_dict)
             except TypeError as te:
                 logger.error(f"Error converting loaded data to KeyInfo for path '{path}'. Data: {info_dict}. Error: {te}")
                 # Skip this entry or return None entirely? For now, skip.
@@ -425,6 +435,23 @@ def load_global_key_map() -> Optional[Dict[str, KeyInfo]]:
     except Exception as e:
         logger.exception(f"Unexpected error loading global key map from {map_path}: {e}")
         return None
+
+def load_old_global_key_map() -> Optional[Dict[str, KeyInfo]]:
+    """Loads the persisted PREVIOUS global path_to_key_info map."""
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        map_path = normalize_path(os.path.join(script_dir, OLD_GLOBAL_KEY_MAP_FILENAME)) # Target old map
+        if not os.path.exists(map_path):
+            logger.warning(f"Previous global key map file not found: {map_path}. This may be the first run.")
+            return None # Return None gracefully if old map doesn't exist
+        with open(map_path, 'r', encoding='utf-8') as f: loaded_data = json.load(f)
+        path_to_key_info: Dict[str, KeyInfo] = {}
+        for path, info_dict in loaded_data.items():
+            try: path_to_key_info[path] = KeyInfo(**info_dict)
+            except TypeError as te: logger.error(f"Error converting OLD KeyInfo data for '{path}': {te}"); continue
+        logger.info(f"Loaded previous global key map ({len(path_to_key_info)} entries) from: {map_path}")
+        return path_to_key_info
+    except Exception as e: logger.exception(f"Unexpected error loading previous global key map: {e}"); return None
 
 def validate_key(key: str) -> bool:
     """

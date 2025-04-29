@@ -15,7 +15,8 @@ import shutil
 from typing import Dict, List, Tuple, Any, Optional, Set
 from cline_utils.dependency_system.core.key_manager import (
     KeyInfo,
-    load_global_key_map, # Added
+    load_global_key_map,
+    load_old_global_key_map, # Added
     validate_key,
     sort_keys as sort_key_info, # Renamed for clarity - only use for List[KeyInfo]
     get_key_from_path as get_key_string_from_path, # Renamed for clarity
@@ -519,9 +520,9 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                    suggestions: Optional[Dict[str, List[Tuple[str, str]]]] = None, # Key STRINGS -> (Key STRING, char)
                    file_to_module: Optional[Dict[str, str]] = None, # norm_file_path -> norm_module_path
                    new_keys: Optional[List[KeyInfo]] = None, # GLOBAL list of new KeyInfo objects
-                   # <<< ADD NEW FLAG >>>
                    force_apply_suggestions: bool = False,
-                   keys_to_explicitly_remove: Optional[Set[str]] = None # Keep this from previous step
+                   keys_to_explicitly_remove: Optional[Set[str]] = None, # Keep this from previous step
+                   use_old_map_for_migration: bool = True
                   ):
     """
     Updates or creates a tracker file based on type using contextual keys.
@@ -967,30 +968,119 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                                    applied_count += 1
             logger.debug(f"Applied {applied_count} structural rules.") # Count individual cell changes
 
-    # --- Copy old values ---
-    logger.debug(f"Copying old grid values. Old keys count: {len(old_keys_list)}")
-    for old_row_key, compressed_row in existing_grid.items():
-        if old_row_key in final_key_to_idx: # Only process rows still present in the FINAL list
+    # --- Copy old values (REVISED LOGIC: Prioritize _old.json map) ---
+    logger.info("Copying old grid values (prioritizing _old.json map)...")
+
+    # 1. Determine the authoritative source for OLD key -> path mapping based on flag
+    old_key_string_to_path: Optional[Dict[str, str]] = None
+    using_old_map = False # Flag for logging method used
+
+    if use_old_map_for_migration:
+        logger.debug("Attempting to use '_old.json' map for migration as requested.")
+        old_path_to_key_info = load_old_global_key_map()
+        if old_path_to_key_info:
+            old_key_string_to_path = {info.key_string: info.norm_path for info in old_path_to_key_info.values()}
+            logger.info("Using 'global_key_map_old.json' as the primary source for old key-path mapping.")
+            using_old_map = True
+            # Optional sanity check
+            if len(old_key_string_to_path) != len(old_path_to_key_info):
+                 logger.warning("Potential duplicate key strings detected in 'global_key_map_old.json'. Mapping might be ambiguous.")
+        else:
+            logger.warning("'_old.json' map not found or failed to load, even though requested. Falling back to tracker's existing key definitions.")
+            # Fall through to use existing_key_defs below
+    else:
+        logger.info("'_old.json' map explicitly skipped for migration (likely first run). Using tracker definitions.")
+        # Flag indicates we should use fallback directly
+
+    # Fallback logic (executed if use_old_map_for_migration was False OR if loading failed above)
+    if old_key_string_to_path is None: # Check if primary method failed or was skipped
+        if existing_key_defs:
+            old_key_string_to_path = existing_key_defs.copy()
+            logger.info(f"Using tracker's own definitions ({len(old_key_string_to_path)} keys) as fallback source.")
+        else:
+            logger.error("Cannot copy old grid values: Neither usable '_old.json' map nor tracker's existing definitions are available.")
+            old_key_string_to_path = None # Ensure it's None if fallback also fails
+
+    # 2. Create reverse map for NEW key definitions (Path -> New Index)
+    path_to_final_idx: Dict[str, int] = {
+        norm_path: final_key_to_idx[key_str]
+        for key_str, norm_path in final_key_defs.items()
+        if key_str in final_key_to_idx # Ensure key is actually in the final index map
+    }
+
+    # 3. Proceed with copy ONLY if we have a valid old key->path map
+    copied_values_count = 0; skipped_due_to_no_old_path = 0; skipped_due_to_path_gone = 0; skipped_due_to_non_placeholder = 0; row_processing_errors = 0
+    if old_key_string_to_path is not None:
+        # Iterate through the OLD grid data (key -> compressed row)
+        for old_row_key, compressed_row in existing_grid.items():
+            # A. Find the path associated with the OLD row key using the chosen source
+            old_row_path = old_key_string_to_path.get(old_row_key)
+            if not old_row_path:
+                # This row key existed in the old grid but not in the authoritative old key map
+                skipped_due_to_no_old_path += 1
+                logger.debug(f"  Skip row '{old_row_key}': Path not found in authoritative old map.")
+                continue
+
+            # Find the NEW index for this OLD path
+            new_row_idx = path_to_final_idx.get(old_row_path)
+            if new_row_idx is None:
+                skipped_due_to_path_gone += 1
+                logger.debug(f"  Skip row path '{old_row_path}' (old key '{old_row_key}'): Path no longer in final definitions.")
+                continue
+
+            # Find the corresponding NEW key string (needed for accessing temp_decomp_grid row)
+            new_row_key = final_sorted_keys_list[new_row_idx] # Get key from index
+
             try:
-                logger.debug(f"Processing old row for key: {old_row_key}")
                 decomp_row = list(decompress(compressed_row))
-                if len(decomp_row) == len(old_keys_list): # Check against OLD key list length
-                    logger.debug(f"  Row {old_row_key}: Length match OK ({len(decomp_row)}). Copying values...")
-                    for old_col_idx, value in enumerate(decomp_row):
-                        old_col_key = old_keys_list[old_col_idx]
-                        if old_col_key in final_key_to_idx: # If the old column key is still in the FINAL list
-                            new_col_idx = final_key_to_idx[old_col_key]; new_row_idx = final_key_to_idx[old_row_key]
-                            if new_row_idx != new_col_idx:
-                                # Only copy if target cell is STILL a placeholder
-                                if temp_decomp_grid[old_row_key][new_col_idx] == PLACEHOLDER_CHAR:
-                                    temp_decomp_grid[old_row_key][new_col_idx] = value
-                                # else: logger.debug(f"    Skipping copy for {old_row_key}[{old_col_key}] due to structural rule '{structural_char}'")
-                else:
-                    logger.warning(f"Grid Rebuild: Row length mismatch for '{old_row_key}' in {output_file}! Expected: {len(old_keys_list)}, Got: {len(decomp_row)}. Skipping copy.")
-                    # logger.warning(f"  Old keys list: {old_keys_list}") # Might be too verbose
-                    # logger.warning(f"  Decompressed row data: {''.join(decomp_row)}")
+                # Check length against the OLD key list
+                if len(decomp_row) != len(old_keys_list):
+                    logger.warning(f"Grid Copy: Row length mismatch for '{old_row_key}'! Expected {len(old_keys_list)}, Got {len(decomp_row)}. Skipping row copy.")
+                    continue
+
+                # Iterate through the OLD column indices
+                for old_col_idx, value in enumerate(decomp_row):
+                    if value in (DIAGONAL_CHAR, PLACEHOLDER_CHAR, EMPTY_CHAR): continue
+
+                    # Get the OLD key and path for this column index
+                    if old_col_idx >= len(old_keys_list): continue # Safety
+                    old_col_key = old_keys_list[old_col_idx]
+                    old_col_path = old_key_string_to_path.get(old_col_key)
+                    if not old_col_path:
+                        skipped_due_to_no_old_path += 1
+                        logger.debug(f"  Skip cell ({old_row_key}[{old_col_idx}]): Old col key '{old_col_key}' path not found.")
+                        continue
+
+                    # Find the NEW index for this OLD path
+                    new_col_idx = path_to_final_idx.get(old_col_path)
+                    if new_col_idx is None:
+                        skipped_due_to_path_gone += 1
+                        logger.debug(f"  Skip cell ({old_row_key}[{old_col_idx}]): Col path '{old_col_path}' (old key '{old_col_key}') no longer in final definitions.")
+                        continue
+
+                    # *** THE CRITICAL COPY STEP ***
+                    # Use the determined NEW indices to place the OLD value
+                    # into the correct cell of the NEW grid structure.
+                    if new_row_idx != new_col_idx: # Ensure not diagonal
+                        target_cell_current_value = temp_decomp_grid[new_row_key][new_col_idx]
+                        if target_cell_current_value == PLACEHOLDER_CHAR:
+                            temp_decomp_grid[new_row_key][new_col_idx] = value
+                            copied_values_count += 1
+                            logger.debug(f"  Copied '{value}' from ({old_row_key},{old_col_key}) path ({old_row_path},{old_col_path}) to ({new_row_key},{new_col_idx})")
+                        else:
+                            skipped_due_to_non_placeholder += 1
+                            logger.debug(f"  Skip cell ({old_row_key}[{old_col_idx}]): Target ({new_row_key},{new_col_idx}) already has '{target_cell_current_value}'.")
+
             except Exception as e:
-                logger.warning(f"Grid Rebuild: Error processing row '{old_row_key}' in {output_file}: {e}. Skipping copy.", exc_info=False) # Less verbose exc_info
+                logger.warning(f"Grid Rebuild: Error processing row '{old_row_key}' in {output_file}: {e}. Skipping copy.", exc_info=False)
+                row_processing_errors += 1
+    else:
+        # This block executes if old_key_string_to_path remained None
+        logger.warning("Skipping grid value copy entirely as no authoritative old key-path mapping could be determined.")
+
+    log_method = 'None'
+    if old_key_string_to_path is not None: log_method = '_old.json map' if using_old_map else 'Tracker Fallback'
+    logger.info(f"Finished copying old grid values. Method: {log_method}. Copied: {copied_values_count}, Skipped (No Old Path): {skipped_due_to_no_old_path}, Skipped (Path Gone): {skipped_due_to_path_gone}, Skipped (Target Filled): {skipped_due_to_non_placeholder}, RowErrors={row_processing_errors}")
 
     # --- Apply Suggestions (Includes Reciprocal/Mutual Logic & Modified Conflict Handling) ---
     suggestion_applied = False
