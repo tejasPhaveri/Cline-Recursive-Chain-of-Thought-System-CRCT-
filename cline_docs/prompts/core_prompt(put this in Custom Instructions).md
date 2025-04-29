@@ -188,6 +188,7 @@ flowchart TD
 ## V. Dependency Tracker Management (Overview)
 
 `module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers (`*_module.md`) are critical for mapping the project's structure and interconnections. Detailed management steps are in the Set-up/Maintenance Plugin (`cline_docs/prompts/setup_maintenance_plugin.md`). **All tracker management MUST be done using the `dependency_processor.py` script.** Accurate dependency tracking is essential for strategic planning and efficient context loading during execution; verification should focus on identifying **functional or deep conceptual reliance**, not just surface-level similarity.
+*Remember, the relationship is stronger than just semantic similarity; it's about the necessary knowledge and intended interaction between these components in the overall system design, even if the current code is a placeholder.*
 
 **Tracker Overview Table & Verification Order:**
 
