@@ -1094,17 +1094,19 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
         key_to_idx = final_key_to_idx
 
         # Iterate through suggestions and apply them, handling reciprocals on the fly
-        for row_key, deps in final_suggestions_to_apply.items():
-            if row_key not in key_to_idx: continue
-            current_decomp_row = temp_decomp_grid.get(row_key)
+        # <<< Restore variable name consistency if needed (row_key is source_key here) >>>
+        for source_key, deps in final_suggestions_to_apply.items():
+            if source_key not in key_to_idx: continue
+            current_decomp_row = temp_decomp_grid.get(source_key)
             if not current_decomp_row: continue
-            row_idx = key_to_idx[row_key]
+            row_idx = key_to_idx[source_key] # Use source_key for row index
 
-            for col_key, dep_char in deps:
-                if col_key not in key_to_idx: continue
-                if row_key == col_key: continue
-                col_idx = key_to_idx[col_key]
-                existing_char_in_grid = current_decomp_row[col_idx] # Char currently in the grid cell
+            # <<< Restore variable name consistency if needed (col_key is target_key here) >>>
+            for target_key, dep_char in deps:
+                if target_key not in key_to_idx: continue
+                if source_key == target_key: continue
+                col_idx = key_to_idx[target_key] # Use target_key for column index
+                existing_char_in_grid = current_decomp_row[col_idx]
 
                 applied_this_iter = False
                 final_char_to_apply = dep_char # Start with the suggested char
@@ -1127,21 +1129,24 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                         suggestion_priority = get_priority(dep_char)
                         # Apply if suggestion is stronger AND existing is NOT 'n'
                         if existing_char_in_grid != 'n' and suggestion_priority > existing_priority:
-                            logger.info(f"Suggestion Conflict RESOLVED in {os.path.basename(output_file)}: Applying '{dep_char}' (prio {suggestion_priority}) over '{existing_char_in_grid}' (prio {existing_priority}) for {row_key}->{col_key}.")
+                            logger.info(f"Suggestion Conflict RESOLVED in {os.path.basename(output_file)}: Applying '{dep_char}' (prio {suggestion_priority}) over '{existing_char_in_grid}' (prio {existing_priority}) for {source_key}->{target_key}.")
                             should_apply_suggestion = True # Set flag to apply suggestion
-                        else: logger.debug(f"Suggestion Conflict Ignored: Grid '{existing_char_in_grid}' kept over sugg '{dep_char}' for {row_key}->{col_key}.")
+                        else: logger.debug(f"Suggestion Conflict Ignored: Grid '{existing_char_in_grid}' kept over sugg '{dep_char}' for {source_key}->{target_key}.")
                     except Exception as e: logger.error(f"Priority check error: {e}. Grid value kept.")
 
                 # --- Apply suggestion if flag is set ---
                 if should_apply_suggestion:
                     # Check for mutual '<' or '>' requiring 'x' upgrade FIRST
                     if dep_char in ('<', '>'):
-                        reverse_decomp_row = temp_decomp_grid.get(col_key)
+                        reverse_decomp_row = temp_decomp_grid.get(target_key)
                         if reverse_decomp_row and row_idx < len(reverse_decomp_row):
                              char_in_reverse = reverse_decomp_row[row_idx]
                              # Check if the reverse direction ALSO has the SAME directional char
                              if char_in_reverse == dep_char:
-                                 logger.debug(f"Mutual Apply: Found '{dep_char}' for {row_key} <-> {col_key}. Upgrading both to 'x'.")
+                                 # <<< RESTORE MUTUAL LOGS >>>
+                                 logger.debug(f"Mutual: Merging {target_key} -> {source_key} to 'x' due to matching '{dep_char}' dependencies.")
+                                 logger.debug(f"Mutual: Merging {source_key} -> {target_key} to 'x' due to matching '{dep_char}' dependencies.")
+                                 # <<< END RESTORE >>>
                                  final_char_to_apply = 'x'
                                  # Update the reverse direction in the grid immediately
                                  reverse_decomp_row[row_idx] = 'x'
@@ -1149,30 +1154,29 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
 
                     # Apply the final character (original suggestion or 'x')
                     if existing_char_in_grid != final_char_to_apply: # Check again in case 'x' upgrade happened
-                        logger.debug(f"Applying to grid: {row_key} -> {col_key} = '{final_char_to_apply}' (Force: {force_apply_suggestions}, Sugg: '{dep_char}', Existed: '{existing_char_in_grid}')")
+                        logger.debug(f"Applying to grid: {source_key} -> {target_key} = '{final_char_to_apply}' (Force: {force_apply_suggestions}, Sugg: '{dep_char}', Existed: '{existing_char_in_grid}')")
                         current_decomp_row[col_idx] = final_char_to_apply
                         suggestion_applied = True
                         applied_this_iter = True
-                        logger.debug(f"Applied suggestion: {row_key} -> {col_key} ({dep_char}) in {output_file}")
+                        logger.debug(f"Applied suggestion: {source_key} -> {target_key} ({final_char_to_apply}) in {output_file}")
 
                     # If NOT upgraded to 'x', check for simple reciprocal needed
                     if not upgrade_to_x:
                         reciprocal_char = None
                         if dep_char == '>': reciprocal_char = '<'
-                        elif dep_char == '<': reciprocal_char = '>' # <<< FIXED: Handle reciprocal for '<' -> '>'
+                        elif dep_char == '<': reciprocal_char = '>'
 
-                        if reciprocal_char: # Check if a reciprocal exists
-                            reverse_decomp_row = temp_decomp_grid.get(col_key)
-                            if reverse_decomp_row and row_idx < len(reverse_decomp_row):
+                        if reciprocal_char:
+                            reverse_decomp_row = temp_decomp_grid.get(target_key) # Check reverse using target_key
+                            if reverse_decomp_row and row_idx < len(reverse_decomp_row): # Use source's index (row_idx)
                                 char_in_reverse = reverse_decomp_row[row_idx]
-                                # Determine if reciprocal should be applied based on force flag
                                 should_apply_reciprocal = False
                                 if force_apply_suggestions:
                                      if char_in_reverse != 'x' and char_in_reverse != reciprocal_char: should_apply_reciprocal = True
                                 else:
                                      if char_in_reverse == PLACEHOLDER_CHAR or get_priority(reciprocal_char) > get_priority(char_in_reverse): should_apply_reciprocal = True
                                 if should_apply_reciprocal:
-                                     logger.debug(f"Reciprocal Apply: Setting {col_key} -> {row_key} = '{reciprocal_char}' (Force: {force_apply_suggestions}, Existed: '{char_in_reverse}')")
+                                     logger.debug(f"Reciprocal Apply: Setting {target_key} -> {source_key}  ('{reciprocal_char}') (Force: {force_apply_suggestions}, Existed: '{char_in_reverse}')")
                                      reverse_decomp_row[row_idx] = reciprocal_char
                                      suggestion_applied = True
 
@@ -1189,7 +1193,7 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                         # User confirmed 'n' will have priority 5, so this also correctly prevents 'n' override
                         if existing_char_in_grid != 'n' and suggestion_priority > existing_priority:
                             # <<< APPLY the suggestion instead of just warning >>>
-                            logger.info(f"Suggestion Conflict RESOLVED in {os.path.basename(output_file)}: For {row_key}->{col_key}, "
+                            logger.info(f"Suggestion Conflict RESOLVED in {os.path.basename(output_file)}: For {source_key}->{target_key}, "
                                            f"applying suggestion '{dep_char}' (prio {suggestion_priority}) over existing '{existing_char_in_grid}' (prio {existing_priority}).")
                             current_decomp_row[col_idx] = dep_char
                             suggestion_applied = True # Mark grid change
@@ -1207,16 +1211,15 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                 # <<< Store details if force applying and a change occurred >>>
                 if force_apply_suggestions and applied_this_iter:
                     # Capture details for the specific commit message
-                    if applied_manual_source is None: applied_manual_source = row_key
-                    elif applied_manual_source != row_key: logger.warning("Multiple source keys detected during forced apply; message may simplify.")
-                    applied_manual_targets.append(col_key) # Add target key
+                    if applied_manual_source is None: applied_manual_source = source_key
+                    elif applied_manual_source != source_key: logger.warning("Multiple source keys detected during forced apply; message may simplify.")
+                    applied_manual_targets.append(target_key) # Add target key
                     # Capture the type that was actually applied (could be 'x' after upgrade)
                     current_applied_type = final_char_to_apply
                     if applied_manual_dep_type is None: applied_manual_dep_type = current_applied_type
                     elif applied_manual_dep_type != current_applied_type: logger.warning("Multiple dependency types detected during forced apply; message may simplify.")
 
-            temp_decomp_grid[row_key] = current_decomp_row # Update the row in the temp grid
-
+            # temp_decomp_grid[row_key] = current_decomp_row # Update the row in the temp grid
 
     # --- Update Grid Edit Timestamp (REVISED LOGIC ORDER) ---
     # Start with the current value read from the file (or the creation message)
@@ -1224,6 +1227,7 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
 
     # 1. Check if specific manual dependencies were applied FIRST
     # Ensure suggestion_applied is True to confirm *some* change happened via suggestions
+    # Use the captured details: applied_manual_source, applied_manual_targets, applied_manual_dep_type
     if force_apply_suggestions and suggestion_applied and applied_manual_source and applied_manual_targets and applied_manual_dep_type:
         # Use the captured details for the specific message
         sorted_targets = sort_key_strings_hierarchically(list(set(applied_manual_targets))) # Use set to remove duplicates before sort
