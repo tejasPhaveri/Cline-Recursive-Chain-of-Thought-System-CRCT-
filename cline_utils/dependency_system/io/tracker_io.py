@@ -800,10 +800,13 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                      # Path should exist if key is in relevant_keys_for_grid, but check defensively
                      if not target_info or target_info.norm_path in all_excluded_abs: continue
                      valid_targets_for_source.append((target_key_str, dep_char))
+                     # <<< MOVED LOG STATEMENT HERE >>>
+                     logger.debug(f"Mini filter: Adding suggestion {src_key_str} -> {target_key_str} ('{dep_char}')")
 
                  if valid_targets_for_source:
                      filtered_suggestions_for_apply[src_key_str].extend(valid_targets_for_source)
-            logger.debug(f"Mini filter: Adding suggestion {src_key_str} -> {target_key_str} ('{dep_char}')")
+
+            # <<< Log statement REMOVED from here >>>
             final_suggestions_to_apply = filtered_suggestions_for_apply # Replace original with filtered
 
     else:
