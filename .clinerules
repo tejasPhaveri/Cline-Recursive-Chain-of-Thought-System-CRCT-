@@ -38,6 +38,7 @@ next_phase: "Set-up/Maintenance"
 - Improve accuracy in determining the user's active shell environment when proposing `execute_command` commands, especially on Windows systems where different shells (CMD, PowerShell) have different syntax. Prioritize environment details but be prepared to ask the user for clarification if necessary.
 - Carefully distinguish between Strategy tasks (planning, defining, designing, exploring, reviewing, analyzing) and Execution tasks (implementing, creating code/scripts, integrating, coding, writing tests, modifying files).
 - Monitor and manage context window size to avoid exceeding limits and requiring premature handoffs.
+- When updating the HDTA Review Progress Tracker, accurately reflect whether the document's content has been *read and reviewed* in the current session, not just whether the file exists or was created. The status checkboxes should reflect *my* processing of the document's content.
 
 [Character_Definitions]
 
