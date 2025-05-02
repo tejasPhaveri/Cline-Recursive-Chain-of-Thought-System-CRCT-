@@ -14,6 +14,7 @@ The dependencies in tracker grids (e.g., `pso4p`) are listed in a *compressed* f
 
 **At initialization the LLM MUST perform the following steps, IN THIS ORDER:**
     1. **Read `.clinerules`**: Determine `current_phase`, `last_action`, and `next_phase`.
+    *Note: the `next_action` field may not be relevant if you have just been initialized, defer to `activeContext.md` to determine your next steps. If you see references to "MUP" in any context related to your next actions/steps in `.clinerules` or `activeContext.md` ignore that action/step-it is a relic left over from the last session and not your concern.*
     2. **Load Plugin**: Based on `next_phase` indicated in `.clinerules`, load the corresponding plugin from `cline_docs/prompts/`. **YOU MUST LOAD THE PLUGIN INSTRUCTIONS. DO NOT PROCEED WITHOUT DOING SO.**
     3. **Read Core Files**: Read the specific files listed in Section II below. Do not re-read these if already loaded in the current session.
     4. **Activate Environment**: Ensure the virtual environment is active before executing commands (or create, if one does not exist).
