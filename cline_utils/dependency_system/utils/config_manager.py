@@ -125,8 +125,8 @@ DEFAULT_CONFIG = {
 # Define character priorities (Higher number = higher priority) - Centralized definition
 # Conforms to the existing convention in dependency_suggester.py
 CHARACTER_PRIORITIES = {
-    'x': 5, 'n': 5,
-    '<': 4, '>': 4, 'd': 4,
+    'x': 5,
+    '<': 4, '>': 4, 'd': 4, 'n': 4,
     'S': 3,
     's': 2,
     'p': 1, 'o': 1,

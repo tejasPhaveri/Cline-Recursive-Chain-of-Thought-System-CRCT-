@@ -30,19 +30,26 @@ next_phase: "Set-up/Maintenance"
 - Ensure correct data types when using methods like `.union()` (requires sets, not lists).
 - Centralizing configuration like character priorities (`config_manager.py`) improves consistency and maintainability over defining them in multiple places.
 - Confirm data types returned by functions (e.g., list vs. set) before applying methods like `.union()`.
+- Systematically verifying dependencies for both directions between keys and understanding the reciprocal system's behavior is crucial for accurate tracker updates.
+- Leveraging the reciprocal system with `add-dependency` by setting '>' from the source to the targets automatically sets the '<' dependency from the targets back to the source and vice versa.
+- Use `execute_command` with appropriate shell commands (like `Rename-Item` for PowerShell) for file system operations such as renaming, instead of trying to simulate them with `write_to_file` or `read_file`. *use the full path*
+- It is critical to perform dependency analysis and read dependent files *before* attempting code modifications to ensure all relevant context is considered. Failing to do so leads to errors and wasted effort.
+- When `apply_diff` fails to find a match, even after re-reading, using `write_to_file` with the complete intended content is a reliable alternative for updating the file.
+- Improve accuracy in determining the user's active shell environment when proposing `execute_command` commands, especially on Windows systems where different shells (CMD, PowerShell) have different syntax. Prioritize environment details but be prepared to ask the user for clarification if necessary.
+- Carefully distinguish between Strategy tasks (planning, defining, designing, exploring, reviewing, analyzing) and Execution tasks (implementing, creating code/scripts, integrating, coding, writing tests, modifying files).
+- Monitor and manage context window size to avoid exceeding limits and requiring premature handoffs.
 
 [Character_Definitions]
 
 ```
-- <: Row depends on column.
-- >: Column depends on row.
-- x: Mutual dependency.
-- d: Documentation dependency.
-- o: Self dependency (diagonal only).
-- n: Verified no dependency.
-- p: Placeholder (unverified).
-- s: Semantic dependency (weak .05-.06)
-- S: Semantic dependency (strong .07+)
+- `<`: Row **functionally relies on** or requires Column for context/operation.
+- `>`: Column **functionally relies on** or requires Row for context/operation.
+- `x`: Mutual functional reliance or deep conceptual link.
+- `d`: Row is documentation **essential for understanding/using** Column, or vice-versa.
+- `o`: Self dependency (diagonal only - managed automatically).
+- `n`: **Verified no functional dependency** or essential conceptual link.
+- `p`: Placeholder (unverified - requires investigation).
+- `s`/`S`: Semantic Similarity suggestion (requires verification for functional/deep conceptual link).
 ```
 
 ---
@@ -55,3 +62,5 @@ next_phase: "Set-up/Maintenance"
 4. Execute the Plan (Tool Use): Use the appropriate tool to execute *one* step of the plan.
 5. Validate the Result: Check if the tool use was successful and if it addressed the error.
 6. Iterate: If the error persists, go back to step 2 and refine the plan based on the new information.
+
+*You MUST monitor the context window usage displayed in the environment details. For every 1/5th of the available/max context window, you MUST initiate MUP.*

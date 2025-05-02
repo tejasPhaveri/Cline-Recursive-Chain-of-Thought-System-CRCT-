@@ -1,9 +1,14 @@
-# Cline Recursive Chain-of-Thought System (CRCT) - v7.6
+# Cline Recursive Chain-of-Thought System (CRCT) - v7.7
 
 Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework designed to manage context, dependencies, and tasks in large-scale Cline projects within VS Code. Built for the Cline extension, CRCT leverages a recursive, file-based approach with a modular dependency tracking system to maintain project state and efficiency as complexity increases.
 
 Version **v7.5** represents a significant restructuring of the CRCT system, bringing it into alignment with its original design goals.  With the core architecture now established, future v7.x releases will focus on performance optimizations, enhancements, and refining the existing codebase.
-- Version **v7.6** fixes various bugs and inconsistencies, enhances logic in the dependency_system files, and refines the operational instructions in the prompts. **Key enhancements include the ability to manually add dependencies involving external (foreign) keys directly into mini-trackers using the `add-dependency` command.**
+- Version **v7.7** significantly restructures the core prompt and plugins, as well as introduces a new phase and plugin prompt, cleanup_consolidation_plugin.md.
+   - cleanup_consolidation is responsible for consolidating project information into the appropriate files and either archiving or deleting old tasks.
+   **WARNING** This new phase leverages shell commands for renaming, moving, and deleting files. **DO NOT** let the system go unattended during this phase if you value your project content. The system *should* ask the user for confirmation on which commands to use for the specific environment it is using, however certain instructions in the Cline and Roo system prompts may interfere with this behavior, so use caution until this new feature has proven to be stable.
+- New templates were added to enhance the strategy and execution phases: hdta_review_progress and hierarchical_task_checklist.
+- Added more utility information to the [LEARNING_JOURNAL] in .clinerules.
+
 This version includes a more automated design, consolidating operations and enhancing efficiency.
 It also incorporates:
 - base templates for all core files
@@ -14,17 +19,9 @@ It also incorporates:
 - **Configurable Embedding Device**: Allows users to optimize performance by selecting the embedding device (`cpu`, `cuda`, `mps`) via `.clinerules.config.json`.
 - **File Exclusion Patterns**: Users can now customize project analysis by defining file exclusion patterns in `.clinerules.config.json`.
 - **Improved Caching and Batch Processing**: Enhanced system performance and efficiency through improved caching and batch processing mechanisms.
-
-**<<<IMPORTANT_NOTICE>>>**
-
-Caching has passed initial tests and has been re-enabled across the system. If you notice odd behavior or inaccuracies, please report them in the github issues section.
-- If issues arise **comment** (`#`) out the `@cached` decorators and the lines leading up to the def  (`# @cached(...)`)
-
-Cache + batch processing enable *significant* time savings.
-- Test project **without** cache and batch processing took ~`11` minutes.
-- Test project **with** cache and batch processing took ~`30` seconds.
-
-**<<<END_IMPORTANT_NOTICE>>>**
+- Cache + batch processing enable *significant* time savings.
+   - Test project **without** cache and batch processing took ~`11` minutes.
+   - Test project **with** cache and batch processing took ~`30` seconds.
 
 ---
 
