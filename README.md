@@ -79,7 +79,7 @@ Introduced the `visualize-dependencies` command (experimental) for generating Me
 
 3. **Set Up Cline Extension**:
    - Open the project in VS Code with the Cline extension installed.
-   - Copy `cline_docs/prompts/core_prompt(put this in Custom Instructions).md` into the Cline system prompt field.
+   - Copy `cline_docs/prompts/core_prompt(put this in Custom Instructions).md` into the Cline Custom Instructions field.
 
 4. **Start the System**:
    - Type `Start.` in the Cline input to initialize the system.
