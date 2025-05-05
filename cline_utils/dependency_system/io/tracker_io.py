@@ -1087,18 +1087,20 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
 
     # <<< START NEW BLOCK: Import Established Relationships for Foreign Keys (Mini-Trackers Only) >>>
     imported_rels_count = 0
+    auto_set_n_count = 0 # Counter for automatic 'n' settings
     if tracker_type == "mini" and module_path: # Ensure we have module_path
-        logger.debug(f"Mini Tracker ({module_key_string}): Importing established relationships for foreign key pairs...")
+        logger.debug(f"Mini Tracker ({module_key_string}): Importing/Resolving relationships for foreign key pairs...")
 
         # Identify foreign keys in the current grid
         foreign_keys_in_grid: Dict[str, KeyInfo] = {} # key_string -> KeyInfo
         for key_str in final_sorted_keys_list:
             key_info = path_to_key_info.get(final_key_defs.get(key_str))
+            # Check if key_info exists and if its parent is different from the current module
             if key_info and key_info.parent_path != module_path:
                 foreign_keys_in_grid[key_str] = key_info
-        
+
         foreign_key_list = list(foreign_keys_in_grid.keys())
-        logger.debug(f"Found {len(foreign_key_list)} foreign keys in grid: {foreign_key_list}")
+        # logger.debug(f"Found {len(foreign_key_list)} foreign keys in grid: {foreign_key_list}") # Uncomment for verbose logging
 
         # Get doc directories for checking home tracker type
         abs_doc_roots_set = {normalize_path(os.path.join(project_root, p)) for p in config.get_doc_directories()}
@@ -1106,60 +1108,64 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
         # Helper function to check if a path is within ANY doc root
         def is_path_in_doc_roots(item_path: str) -> bool:
             norm_item_path = normalize_path(item_path)
+            # Check if item path is equal to or a subpath of any doc root
             return any(is_subpath(norm_item_path, doc_root) or norm_item_path == doc_root
                        for doc_root in abs_doc_roots_set)
+
+        # Define character sets for clarity in conditions
+        OVERWRITABLE_CHARS = {'p', 's', 'S', 'n'}
+        POSITIVE_IMPORT_CHARS = {'<', '>', 'x', 'd'}
 
         # Iterate through unique pairs of foreign keys
         for i in range(len(foreign_key_list)):
             fk1_str = foreign_key_list[i]
-            info1 = foreign_keys_in_grid[fk1_str]
-            fk1_idx = final_key_to_idx[fk1_str]
+            info1 = foreign_keys_in_grid[fk1_str] # We know this key exists in the map
+            fk1_idx = final_key_to_idx[fk1_str] # Get index in the current (final) grid
 
             for j in range(i + 1, len(foreign_key_list)):
                 fk2_str = foreign_key_list[j]
-                info2 = foreign_keys_in_grid[fk2_str]
-                fk2_idx = final_key_to_idx[fk2_str]
+                info2 = foreign_keys_in_grid[fk2_str] # We know this key exists in the map
+                fk2_idx = final_key_to_idx[fk2_str] # Get index in the current (final) grid
 
-                # <<< REMOVED the early check for placeholders >>>
-                # We will check individually before overwriting later
+                # Get current characters from the mini-tracker's temp grid
+                current_char_12 = temp_decomp_grid[fk1_str][fk2_idx]
+                current_char_21 = temp_decomp_grid[fk2_str][fk1_idx]
 
                 # Determine the shared home tracker based on parent paths
                 home_tracker_path: Optional[str] = None
                 parent1 = info1.parent_path
                 parent2 = info2.parent_path
 
-                # Check if BOTH keys belong to ANY doc directory
                 is_fk1_doc = is_path_in_doc_roots(info1.norm_path)
                 is_fk2_doc = is_path_in_doc_roots(info2.norm_path)
 
                 if is_fk1_doc and is_fk2_doc:
                     # Case 1: Both items are documentation items -> Home is doc_tracker.md
                     home_tracker_path = get_tracker_path(project_root, tracker_type="doc")
-                    logger.debug(f"  Pair ({fk1_str}, {fk2_str}): Both in doc roots. Home: Doc Tracker.")
-
+                    # logger.debug(f"  Pair ({fk1_str}, {fk2_str}): Both in doc roots. Home: Doc Tracker.")
                 elif not is_fk1_doc and not is_fk2_doc and parent1 and parent1 == parent2:
                     # Case 2: Both items are code items AND share the same direct parent directory
-                    # Ensure shared parent isn't the current module itself
-                    if parent1 != module_path:
+                    if parent1 != module_path: # Ensure shared parent isn't the current module itself
                         home_tracker_path = get_tracker_path(project_root, tracker_type="mini", module_path=parent1)
-                        logger.debug(f"  Pair ({fk1_str}, {fk2_str}): Shared code parent '{parent1}'. Home: Mini Tracker.")
-                    # else: Parent is the current module, relation is internal, skip import
-
-                # Case 3: All other combinations (doc/code mix, different code parents)
-                # -> No single shared home tracker defines their specific relationship directly.
-                else:
-                    # logger.debug(f"  Pair ({fk1_str}, {fk2_str}): No shared home tracker (mix or different parents).")
-                    home_tracker_path = None # Explicitly None
-                # <<< END REVISED Home Tracker Logic >>>
+                        # logger.debug(f"  Pair ({fk1_str}, {fk2_str}): Shared code parent '{parent1}'. Home: Mini Tracker.")
+                # else: # Case 3: Mix or different parents -> No single shared home tracker
+                    # logger.debug(f"  Pair ({fk1_str}, {fk2_str}): No shared home tracker identified.")
+                    home_tracker_path = None
 
 
-                # If a home tracker was identified, read it and lookup the relationship
+                # Attempt to read relationship from home tracker
+                home_char_12 = PLACEHOLDER_CHAR # Default if not found/defined
+                home_char_21 = PLACEHOLDER_CHAR # Default if not found/defined
+                found_home_rel_12 = False # Flag if non-'p' relation was found
+                found_home_rel_21 = False # Flag if non-'p' relation was found
+
                 if home_tracker_path and os.path.exists(home_tracker_path):
-                    logger.debug(f"  Reading home tracker: {os.path.basename(home_tracker_path)}")
+                    # logger.debug(f"  Reading home tracker: {os.path.basename(home_tracker_path)}")
                     home_data = read_tracker_file(home_tracker_path) # Cached read
                     home_keys = home_data.get("keys", {})
                     home_grid = home_data.get("grid", {})
 
+                    # Check if BOTH keys exist in the home tracker's definitions
                     if home_keys and home_grid and fk1_str in home_keys and fk2_str in home_keys:
                         # Get sorted keys and index map for the home tracker
                         home_keys_list = sort_key_strings_hierarchically(list(home_keys.keys()))
@@ -1167,56 +1173,90 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                         home_fk1_idx = home_key_to_idx.get(fk1_str)
                         home_fk2_idx = home_key_to_idx.get(fk2_str)
 
+                        # Ensure indices were found (should be if keys are in map)
                         if home_fk1_idx is not None and home_fk2_idx is not None:
-                            char_12 = PLACEHOLDER_CHAR
-                            char_21 = PLACEHOLDER_CHAR
-                            # Extract char 1->2
+                            # Extract char 1->2 safely
                             row1_comp = home_grid.get(fk1_str)
                             if row1_comp:
                                 try:
                                     row1_decomp = decompress(row1_comp)
                                     if len(row1_decomp) == len(home_keys_list) and home_fk2_idx < len(row1_decomp):
-                                        char_12 = row1_decomp[home_fk2_idx]
+                                        extracted_char = row1_decomp[home_fk2_idx]
+                                        home_char_12 = extracted_char # Store extracted char
+                                        if extracted_char != PLACEHOLDER_CHAR:
+                                            found_home_rel_12 = True # Mark non-'p' found
                                 except Exception as e: logger.warning(f"  Error decompressing home row {fk1_str}: {e}")
-                            # Extract char 2->1
+
+                            # Extract char 2->1 safely
                             row2_comp = home_grid.get(fk2_str)
                             if row2_comp:
                                 try:
                                     row2_decomp = decompress(row2_comp)
                                     if len(row2_decomp) == len(home_keys_list) and home_fk1_idx < len(row2_decomp):
-                                        char_21 = row2_decomp[home_fk1_idx]
+                                        extracted_char = row2_decomp[home_fk1_idx]
+                                        home_char_21 = extracted_char # Store extracted char
+                                        if extracted_char != PLACEHOLDER_CHAR:
+                                            found_home_rel_21 = True # Mark non-'p' found
                                 except Exception as e: logger.warning(f"  Error decompressing home row {fk2_str}: {e}")
+                        # else: logger.warning(f"  Keys {fk1_str} or {fk2_str} missing index in home tracker {os.path.basename(home_tracker_path)}.")
+                    # else: logger.debug(f"  Keys {fk1_str} or {fk2_str} not found in home tracker {os.path.basename(home_tracker_path)} keys/grid.")
+                # elif home_tracker_path: logger.debug(f"  Home tracker not found or empty: {home_tracker_path}")
 
-                            # <<< START MODIFIED IMPORT LOGIC >>>
-                            imported_something = False
-                            # Check and import for fk1 -> fk2
-                            current_char_12 = temp_decomp_grid[fk1_str][fk2_idx]
-                            # Overwrite if current is p/s/S AND imported is not p
-                            if current_char_12 in (PLACEHOLDER_CHAR, 's', 'S') and char_12 != PLACEHOLDER_CHAR:
-                                temp_decomp_grid[fk1_str][fk2_idx] = char_12
-                                imported_rels_count += 1
-                                imported_something = True
-                                logger.debug(f"    Imported {fk1_str}->{fk2_str}: '{char_12}' over existing '{current_char_12}'")
 
-                            # Check and import for fk2 -> fk1
-                            current_char_21 = temp_decomp_grid[fk2_str][fk1_idx]
-                            # Overwrite if current is p/s/S AND imported is not p
-                            if current_char_21 in (PLACEHOLDER_CHAR, 's', 'S') and char_21 != PLACEHOLDER_CHAR:
-                                temp_decomp_grid[fk2_str][fk1_idx] = char_21
-                                imported_rels_count += 1
-                                imported_something = True # Mark true even if only one side was imported
-                                logger.debug(f"    Imported {fk2_str}->{fk1_str}: '{char_21}' over existing '{current_char_21}'")
+                # --- Determine Final Characters and Apply ---
+                final_char_12 = current_char_12 # Start with current value
+                final_char_21 = current_char_21 # Start with current value
+                changed_12 = False
+                changed_21 = False
 
-                            if imported_something:
-                                 logger.info(f"  Imported relationship for ({fk1_str}, {fk2_str}) from {os.path.basename(home_tracker_path)}: ('{char_12}', '{char_21}')")
+                # --- Determine final value for 1 -> 2 ---
+                # Rule 1: Import positive relation from home over overwritable chars
+                if current_char_12 in OVERWRITABLE_CHARS and home_char_12 in POSITIVE_IMPORT_CHARS:
+                    # logger.debug(f"    Importing positive {fk1_str}->{fk2_str}: '{home_char_12}' over existing '{current_char_12}' from {os.path.basename(home_tracker_path or 'N/A')}")
+                    final_char_12 = home_char_12
+                # Rule 1b: Import 'n' from home only over p/s/S
+                elif current_char_12 in ('p', 's', 'S') and home_char_12 == 'n':
+                    # logger.debug(f"    Importing 'n' {fk1_str}->{fk2_str}: '{home_char_12}' over existing '{current_char_12}' from {os.path.basename(home_tracker_path or 'N/A')}")
+                    final_char_12 = home_char_12
+                # Rule 2: Explicitly set 'n' if current is 'p' AND relationship wasn't *found defined* in home
+                elif current_char_12 == PLACEHOLDER_CHAR and not found_home_rel_12:
+                    # logger.info(f"  Auto-setting {fk1_str}->{fk2_str} to 'n' (no defined relationship found in home tracker).")
+                    final_char_12 = 'n'
+                # --- If none of the above, final_char_12 remains current_char_12 ---
 
-                        else: logger.warning(f"  Keys {fk1_str} or {fk2_str} missing index in home tracker {os.path.basename(home_tracker_path)}.")
-                    else: logger.debug(f"  Keys {fk1_str} or {fk2_str} not found in home tracker {os.path.basename(home_tracker_path)} keys/grid.")
-                elif home_tracker_path:
-                    logger.debug(f"  Home tracker not found or empty: {home_tracker_path}")
-                # else: logger.debug(f"  No shared home tracker identified for ({fk1_str}, {fk2_str}).")
+                # --- Determine final value for 2 -> 1 ---
+                # Rule 1: Import positive relation from home over overwritable chars
+                if current_char_21 in OVERWRITABLE_CHARS and home_char_21 in POSITIVE_IMPORT_CHARS:
+                    # logger.debug(f"    Importing positive {fk2_str}->{fk1_str}: '{home_char_21}' over existing '{current_char_21}' from {os.path.basename(home_tracker_path or 'N/A')}")
+                    final_char_21 = home_char_21
+                 # Rule 1b: Import 'n' from home only over p/s/S
+                elif current_char_21 in ('p', 's', 'S') and home_char_21 == 'n':
+                    # logger.debug(f"    Importing 'n' {fk2_str}->{fk1_str}: '{home_char_21}' over existing '{current_char_21}' from {os.path.basename(home_tracker_path or 'N/A')}")
+                    final_char_21 = home_char_21
+                # Rule 2: Explicitly set 'n' if current is 'p' AND relationship wasn't *found defined* in home
+                elif current_char_21 == PLACEHOLDER_CHAR and not found_home_rel_21:
+                    # logger.info(f"  Auto-setting {fk2_str}->{fk1_str} to 'n' (no defined relationship found in home tracker).")
+                    final_char_21 = 'n'
+                # --- If none of the above, final_char_21 remains current_char_21 ---
 
-        logger.info(f"Finished importing established relationships. Imported {imported_rels_count} non-placeholder values.")
+
+                # --- Apply changes if the final determined character is different from the current one ---
+                if temp_decomp_grid[fk1_str][fk2_idx] != final_char_12:
+                    temp_decomp_grid[fk1_str][fk2_idx] = final_char_12
+                    imported_rels_count += 1 # Count any cell change
+                    changed_12 = True
+
+                if temp_decomp_grid[fk2_str][fk1_idx] != final_char_21:
+                    temp_decomp_grid[fk2_str][fk1_idx] = final_char_21
+                    imported_rels_count += 1 # Count any cell change
+                    changed_21 = True
+
+                # Log once per pair if any change occurred
+                if changed_12 or changed_21:
+                     logger.info(f"  Updated relationship for ({fk1_str}, {fk2_str}) based on home tracker / auto-n rule. New: ('{final_char_12}', '{final_char_21}')")
+
+
+        logger.info(f"Finished importing/resolving relationships. Updated cell count: {imported_rels_count}.")
     # <<< END NEW BLOCK >>>
 
     # --- Apply Suggestions (Includes Reciprocal/Mutual Logic & Modified Conflict Handling) ---
