@@ -1085,6 +1085,134 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
     if old_key_string_to_path is not None: log_method = '_old.json map' if using_old_map else 'Tracker Fallback'
     logger.info(f"Finished copying old grid values. Method: {log_method}. Copied: {copied_values_count}, Skipped (No Old Path): {skipped_due_to_no_old_path}, Skipped (Path Gone): {skipped_due_to_path_gone}, Skipped (Target Filled): {skipped_due_to_non_placeholder}, RowErrors={row_processing_errors}")
 
+    # <<< START NEW BLOCK: Import Established Relationships for Foreign Keys (Mini-Trackers Only) >>>
+    imported_rels_count = 0
+    if tracker_type == "mini" and module_path: # Ensure we have module_path
+        logger.debug(f"Mini Tracker ({module_key_string}): Importing established relationships for foreign key pairs...")
+
+        # Identify foreign keys in the current grid
+        foreign_keys_in_grid: Dict[str, KeyInfo] = {} # key_string -> KeyInfo
+        for key_str in final_sorted_keys_list:
+            key_info = path_to_key_info.get(final_key_defs.get(key_str))
+            if key_info and key_info.parent_path != module_path:
+                foreign_keys_in_grid[key_str] = key_info
+        
+        foreign_key_list = list(foreign_keys_in_grid.keys())
+        logger.debug(f"Found {len(foreign_key_list)} foreign keys in grid: {foreign_key_list}")
+
+        # Get doc directories for checking home tracker type
+        abs_doc_roots_set = {normalize_path(os.path.join(project_root, p)) for p in config.get_doc_directories()}
+
+        # Helper function to check if a path is within ANY doc root
+        def is_path_in_doc_roots(item_path: str) -> bool:
+            norm_item_path = normalize_path(item_path)
+            return any(is_subpath(norm_item_path, doc_root) or norm_item_path == doc_root
+                       for doc_root in abs_doc_roots_set)
+
+        # Iterate through unique pairs of foreign keys
+        for i in range(len(foreign_key_list)):
+            fk1_str = foreign_key_list[i]
+            info1 = foreign_keys_in_grid[fk1_str]
+            fk1_idx = final_key_to_idx[fk1_str]
+
+            for j in range(i + 1, len(foreign_key_list)):
+                fk2_str = foreign_key_list[j]
+                info2 = foreign_keys_in_grid[fk2_str]
+                fk2_idx = final_key_to_idx[fk2_str]
+
+                # Only proceed if both cells are currently placeholders
+                if (temp_decomp_grid[fk1_str][fk2_idx] != PLACEHOLDER_CHAR or
+                    temp_decomp_grid[fk2_str][fk1_idx] != PLACEHOLDER_CHAR):
+                    # logger.debug(f"  Skipping import for ({fk1_str}, {fk2_str}): Cells not placeholders ('{temp_decomp_grid[fk1_str][fk2_idx]}', '{temp_decomp_grid[fk2_str][fk1_idx]}').")
+                    continue
+
+                # Determine the shared home tracker based on parent paths
+                home_tracker_path: Optional[str] = None
+                parent1 = info1.parent_path
+                parent2 = info2.parent_path
+
+                # Check if BOTH keys belong to ANY doc directory
+                is_fk1_doc = is_path_in_doc_roots(info1.norm_path)
+                is_fk2_doc = is_path_in_doc_roots(info2.norm_path)
+
+                if is_fk1_doc and is_fk2_doc:
+                    # Case 1: Both items are documentation items -> Home is doc_tracker.md
+                    home_tracker_path = get_tracker_path(project_root, tracker_type="doc")
+                    logger.debug(f"  Pair ({fk1_str}, {fk2_str}): Both in doc roots. Home: Doc Tracker.")
+
+                elif not is_fk1_doc and not is_fk2_doc and parent1 and parent1 == parent2:
+                    # Case 2: Both items are code items AND share the same direct parent directory
+                    # Ensure shared parent isn't the current module itself
+                    if parent1 != module_path:
+                        home_tracker_path = get_tracker_path(project_root, tracker_type="mini", module_path=parent1)
+                        logger.debug(f"  Pair ({fk1_str}, {fk2_str}): Shared code parent '{parent1}'. Home: Mini Tracker.")
+                    # else: Parent is the current module, relation is internal, skip import
+
+                # Case 3: All other combinations (doc/code mix, different code parents)
+                # -> No single shared home tracker defines their specific relationship directly.
+                else:
+                    # logger.debug(f"  Pair ({fk1_str}, {fk2_str}): No shared home tracker (mix or different parents).")
+                    home_tracker_path = None # Explicitly None
+                # <<< END REVISED Home Tracker Logic >>>
+
+
+                # If a home tracker was identified, read it and lookup the relationship
+                if home_tracker_path and os.path.exists(home_tracker_path):
+                    logger.debug(f"  Reading home tracker: {os.path.basename(home_tracker_path)}")
+                    home_data = read_tracker_file(home_tracker_path) # Cached read
+                    home_keys = home_data.get("keys", {})
+                    home_grid = home_data.get("grid", {})
+
+                    if home_keys and home_grid and fk1_str in home_keys and fk2_str in home_keys:
+                        # Get sorted keys and index map for the home tracker
+                        home_keys_list = sort_key_strings_hierarchically(list(home_keys.keys()))
+                        home_key_to_idx = {k: idx for idx, k in enumerate(home_keys_list)}
+                        home_fk1_idx = home_key_to_idx.get(fk1_str)
+                        home_fk2_idx = home_key_to_idx.get(fk2_str)
+
+                        if home_fk1_idx is not None and home_fk2_idx is not None:
+                            char_12 = PLACEHOLDER_CHAR
+                            char_21 = PLACEHOLDER_CHAR
+                            # Extract char 1->2
+                            row1_comp = home_grid.get(fk1_str)
+                            if row1_comp:
+                                try:
+                                    row1_decomp = decompress(row1_comp)
+                                    if len(row1_decomp) == len(home_keys_list) and home_fk2_idx < len(row1_decomp):
+                                        char_12 = row1_decomp[home_fk2_idx]
+                                except Exception as e: logger.warning(f"  Error decompressing home row {fk1_str}: {e}")
+                            # Extract char 2->1
+                            row2_comp = home_grid.get(fk2_str)
+                            if row2_comp:
+                                try:
+                                    row2_decomp = decompress(row2_comp)
+                                    if len(row2_decomp) == len(home_keys_list) and home_fk1_idx < len(row2_decomp):
+                                        char_21 = row2_decomp[home_fk1_idx]
+                                except Exception as e: logger.warning(f"  Error decompressing home row {fk2_str}: {e}")
+
+                            # Import the relationship if found and not placeholder
+                            imported_something = False
+                            if char_12 != PLACEHOLDER_CHAR:
+                                temp_decomp_grid[fk1_str][fk2_idx] = char_12
+                                imported_rels_count += 1
+                                imported_something = True
+                            if char_21 != PLACEHOLDER_CHAR:
+                                temp_decomp_grid[fk2_str][fk1_idx] = char_21
+                                imported_rels_count += 1
+                                imported_something = True
+                            
+                            if imported_something:
+                                 logger.info(f"  Imported relationship for ({fk1_str}, {fk2_str}) from {os.path.basename(home_tracker_path)}: ('{char_12}', '{char_21}')")
+
+                        else: logger.warning(f"  Keys {fk1_str} or {fk2_str} missing index in home tracker {os.path.basename(home_tracker_path)}.")
+                    else: logger.debug(f"  Keys {fk1_str} or {fk2_str} not found in home tracker {os.path.basename(home_tracker_path)} keys/grid.")
+                elif home_tracker_path:
+                    logger.debug(f"  Home tracker not found or empty: {home_tracker_path}")
+                # else: logger.debug(f"  No shared home tracker identified for ({fk1_str}, {fk2_str}).")
+
+        logger.info(f"Finished importing established relationships. Imported {imported_rels_count} non-placeholder values.")
+    # <<< END NEW BLOCK >>>
+
     # --- Apply Suggestions (Includes Reciprocal/Mutual Logic & Modified Conflict Handling) ---
     suggestion_applied = False
     # Initialize variables to store details for the specific manual update message
