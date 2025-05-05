@@ -1120,11 +1120,8 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                 info2 = foreign_keys_in_grid[fk2_str]
                 fk2_idx = final_key_to_idx[fk2_str]
 
-                # Only proceed if both cells are currently placeholders
-                if (temp_decomp_grid[fk1_str][fk2_idx] != PLACEHOLDER_CHAR or
-                    temp_decomp_grid[fk2_str][fk1_idx] != PLACEHOLDER_CHAR):
-                    # logger.debug(f"  Skipping import for ({fk1_str}, {fk2_str}): Cells not placeholders ('{temp_decomp_grid[fk1_str][fk2_idx]}', '{temp_decomp_grid[fk2_str][fk1_idx]}').")
-                    continue
+                # <<< REMOVED the early check for placeholders >>>
+                # We will check individually before overwriting later
 
                 # Determine the shared home tracker based on parent paths
                 home_tracker_path: Optional[str] = None
@@ -1190,17 +1187,26 @@ def update_tracker(output_file_suggestion: str, # Path suggestion (may be ignore
                                         char_21 = row2_decomp[home_fk1_idx]
                                 except Exception as e: logger.warning(f"  Error decompressing home row {fk2_str}: {e}")
 
-                            # Import the relationship if found and not placeholder
+                            # <<< START MODIFIED IMPORT LOGIC >>>
                             imported_something = False
-                            if char_12 != PLACEHOLDER_CHAR:
+                            # Check and import for fk1 -> fk2
+                            current_char_12 = temp_decomp_grid[fk1_str][fk2_idx]
+                            # Overwrite if current is p/s/S AND imported is not p
+                            if current_char_12 in (PLACEHOLDER_CHAR, 's', 'S') and char_12 != PLACEHOLDER_CHAR:
                                 temp_decomp_grid[fk1_str][fk2_idx] = char_12
                                 imported_rels_count += 1
                                 imported_something = True
-                            if char_21 != PLACEHOLDER_CHAR:
+                                logger.debug(f"    Imported {fk1_str}->{fk2_str}: '{char_12}' over existing '{current_char_12}'")
+
+                            # Check and import for fk2 -> fk1
+                            current_char_21 = temp_decomp_grid[fk2_str][fk1_idx]
+                            # Overwrite if current is p/s/S AND imported is not p
+                            if current_char_21 in (PLACEHOLDER_CHAR, 's', 'S') and char_21 != PLACEHOLDER_CHAR:
                                 temp_decomp_grid[fk2_str][fk1_idx] = char_21
                                 imported_rels_count += 1
-                                imported_something = True
-                            
+                                imported_something = True # Mark true even if only one side was imported
+                                logger.debug(f"    Imported {fk2_str}->{fk1_str}: '{char_21}' over existing '{current_char_21}'")
+
                             if imported_something:
                                  logger.info(f"  Imported relationship for ({fk1_str}, {fk2_str}) from {os.path.basename(home_tracker_path)}: ('{char_12}', '{char_21}')")
 
