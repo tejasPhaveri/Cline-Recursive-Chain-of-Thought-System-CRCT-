@@ -1,6 +1,7 @@
 <!--
 Instructions:  Fill in the placeholders below to create the System Manifest.
 This document provides a high-level overview of the entire system.
+*Do NOT include these comments in the created file.*
 -->
 
 # System: {SystemName}

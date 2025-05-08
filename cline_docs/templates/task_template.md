@@ -1,6 +1,9 @@
 <!--
 Instructions: Fill in the placeholders below to create a Task Instruction document.
-This document provides detailed, procedural guidance for a specific task.
+This document provides detailed, procedural guidance for a specific task. Provide ONLY the MINIMAL necessary context for THIS task.
+- Use precise links to specific definitions/sections (e.g., `file.py#MyClass.my_method`, `doc_key#Section Title`).
+- Link to prerequisite Task keys ONLY if they produce a direct, necessary input for THIS task.
+*Do NOT include these comments in the created file.*
 -->
 
 # Task: {TaskName}
