@@ -8,7 +8,8 @@ This document provides detailed, procedural guidance for a specific task. Provid
 
 # Task: {TaskName}
    **Parent:** `implementation_plan_{filename}.md` or {ParentTask}
-   **Children:** {SubTasks}
+   **Children:** {Optional: Links to specific, separate .md task files generated or delegated by this task}
+<!-- Use sparingly. For pre-planned decomposition, nest tasks under an Implementation Plan. This field is for tasks that dynamically spawn other distinct, trackable .md tasks during their execution/planning. -->
 
 ## Objective
 [Clear, specific goal statement]
