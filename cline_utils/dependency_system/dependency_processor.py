@@ -21,13 +21,13 @@ from cline_utils.dependency_system.core.dependency_grid import (
     add_dependency_to_grid, get_dependencies_from_grid
 )
 from cline_utils.dependency_system.core.key_manager import (
-    KeyInfo, KeyGenerationError, validate_key, sort_key_strings_hierarchically,
+    KeyInfo, KeyGenerationError, load_old_global_key_map, validate_key, sort_key_strings_hierarchically,
     load_global_key_map
 )
 
 # --- IO Imports ---
 from cline_utils.dependency_system.io.tracker_io import (
-    remove_key_from_tracker, merge_trackers, write_tracker_file,
+    PathMigrationInfo, _build_path_migration_map, remove_key_from_tracker, merge_trackers, write_tracker_file,
     export_tracker, update_tracker
 )
 
@@ -386,30 +386,53 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
     """Handle the show-dependencies command using the contextual key system."""
     target_key_str = args.key
     logger.info(f"Showing dependencies for key string: {target_key_str}")
-    path_to_key_info = _load_global_map_or_exit()
+    
+    # --- Load CURRENT Global Map ---
+    current_global_map = _load_global_map_or_exit() # path_to_key_info
    
     config = ConfigManager()
     project_root = get_project_root()
-    matching_infos = [info for info in path_to_key_info.values() if info.key_string == target_key_str]
+    matching_infos = [info for info in current_global_map.values() if info.key_string == target_key_str]
     if not matching_infos:
         print(f"Error: Key string '{target_key_str}' not found in the project.")
         return 1
+    
     target_info: KeyInfo
     if len(matching_infos) > 1:
         print(f"Warning: Key string '{target_key_str}' is ambiguous and matches multiple paths:")
-        for i, info in enumerate(matching_infos):
-            print(f"  [{i+1}] {info.norm_path}")
-        target_info = matching_infos[0] # Use the first match
+        for i, info in enumerate(matching_infos): print(f"  [{i+1}] {info.norm_path}")
+        target_info = matching_infos[0] 
         print(f"Using the first match: {target_info.norm_path}")
     else:
         target_info = matching_infos[0]
     target_norm_path = target_info.norm_path
     print(f"\n--- Dependencies for Key: {target_key_str} (Path: {target_norm_path}) ---")
 
+    # --- Build Path Migration Map ---
+    logger.debug("Building path migration map for show-dependencies...")
+    old_global_map = load_old_global_key_map() # Load old map (can be None)
+    path_migration_info: PathMigrationInfo
+    try:
+        # Call the builder function from tracker_io
+        path_migration_info = _build_path_migration_map(old_global_map, current_global_map)
+    except ValueError as ve:
+         logger.error(f"Failed to build migration map for show-dependencies: {ve}. Results may be inaccurate.")
+         # Create a dummy "current state only" migration map as a fallback
+         path_migration_info = {info.norm_path: (info.key_string, info.key_string) for info in current_global_map.values()}
+    except Exception as e:
+         logger.error(f"Unexpected error building migration map for show-dependencies: {e}. Results may be inaccurate.", exc_info=True)
+         path_migration_info = {info.norm_path: (info.key_string, info.key_string) for info in current_global_map.values()}
+
+
     # --- Use Utility Functions ---
     all_tracker_paths = find_all_tracker_paths(config, project_root)
     if not all_tracker_paths: print("Warning: No tracker files found.")
-    aggregated_links_with_origins = aggregate_all_dependencies(all_tracker_paths, path_to_key_info)
+    
+    # Pass the generated path_migration_info to aggregate_all_dependencies
+    aggregated_links_with_origins = aggregate_all_dependencies(
+        all_tracker_paths, 
+        path_migration_info # MODIFIED: Pass the migration map
+    )
 
     # --- Process Aggregated Results for Display ---
     all_dependencies_by_type = defaultdict(set) # Store sets of (dep_key_string, dep_path_string) tuples
@@ -431,7 +454,7 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
 
         if dep_key_str:
             # Find path for the dependency key
-            dep_info = next((info for info in path_to_key_info.values() if info.key_string == dep_key_str), None)
+            dep_info = next((info for info in current_global_map.values() if info.key_string == dep_key_str), None)
             dep_path_str = dep_info.norm_path if dep_info else "PATH_NOT_FOUND_GLOBALLY"
             # Add to the correct category for display
             all_dependencies_by_type[display_char].add((dep_key_str, dep_path_str))
@@ -572,14 +595,28 @@ def handle_visualize_dependencies(args: argparse.Namespace) -> int:
 
     # 3. Load necessary data
     try:
-        global_path_to_key_info_cli = _load_global_map_or_exit()
+        current_global_map_cli = _load_global_map_or_exit() # Renamed for clarity
         config_cli = ConfigManager()
         project_root_cli = get_project_root()
         # Use find_all_tracker_paths from tracker_io module
         all_tracker_paths_cli = find_all_tracker_paths(config_cli, project_root_cli)
         if not all_tracker_paths_cli:
             print("Warning: No tracker files found. Diagram may be empty.")
-            # Allow continuing to potentially generate an empty diagram structure
+
+        # --- Build Path Migration Map FOR THIS COMMAND ---
+        logger.debug("Building path migration map for visualize-dependencies command...")
+        old_global_map_cli = load_old_global_key_map() # Load old map
+        path_migration_info_cli: PathMigrationInfo
+        try:
+            path_migration_info_cli = _build_path_migration_map(old_global_map_cli, current_global_map_cli)
+        except ValueError as ve:
+            logger.error(f"Failed to build migration map for visualize-dependencies: {ve}. Visualization may be based on current state only or fail.")
+            # Fallback to a "current state only" dummy migration map
+            path_migration_info_cli = {info.norm_path: (info.key_string, info.key_string) for info in current_global_map_cli.values()}
+        except Exception as e:
+            logger.error(f"Unexpected error building migration map for visualize-dependencies: {e}. Visualization may be inaccurate.", exc_info=True)
+            path_migration_info_cli = {info.norm_path: (info.key_string, info.key_string) for info in current_global_map_cli.values()}
+
     except Exception as e:
         logger.exception("Failed to load data required for visualization.")
         print(f"Error loading data needed for visualization: {e}", file=sys.stderr)
@@ -589,8 +626,9 @@ def handle_visualize_dependencies(args: argparse.Namespace) -> int:
     # 4. Call the core generation function from the new module
     mermaid_string_generated = generate_mermaid_diagram(
         focus_keys_list=focus_keys_list_cli,
-        global_path_to_key_info_map=global_path_to_key_info_cli,
-        all_tracker_paths_list=list(all_tracker_paths_cli), # Pass as list
+        global_path_to_key_info_map=current_global_map_cli, # Still pass current map for node info
+        path_migration_info=path_migration_info_cli,       # Pass the migration map
+        all_tracker_paths_list=list(all_tracker_paths_cli),
         config_manager_instance=config_cli
     )
 

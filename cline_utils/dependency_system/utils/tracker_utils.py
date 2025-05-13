@@ -4,16 +4,20 @@ import os
 import glob
 import logging
 import re
-from typing import Any, Dict, Set, Tuple, List
+from typing import Any, Dict, Set, Tuple, List, Optional
 from collections import defaultdict
 
 from .cache_manager import cached
 from .config_manager import ConfigManager
 from .path_utils import normalize_path, get_project_root
 from cline_utils.dependency_system.core.key_manager import KeyInfo, sort_key_strings_hierarchically, validate_key
-from cline_utils.dependency_system.core.dependency_grid import decompress, DIAGONAL_CHAR, EMPTY_CHAR
+from cline_utils.dependency_system.core.dependency_grid import PLACEHOLDER_CHAR, decompress, DIAGONAL_CHAR, EMPTY_CHAR
 
 logger = logging.getLogger(__name__)
+
+# Type alias from tracker_io
+PathMigrationInfo = Dict[str, Tuple[Optional[str], Optional[str]]] # path -> (old_key, new_key)
+
 
 @cached("tracker_data",
         key_func=lambda tracker_path:
@@ -112,16 +116,21 @@ def find_all_tracker_paths(config: ConfigManager, project_root: str) -> Set[str]
     logger.info(f"Found {len(all_tracker_paths)} total tracker files.")
     return all_tracker_paths
 
+# --- Modified Aggregation Function ---
+@cached("aggregation", key_func=lambda paths, pmi: f"agg:{':'.join(sorted(list(paths)))}:{hash(tuple(sorted(pmi.items())))}", ttl=300)
 def aggregate_all_dependencies(
     tracker_paths: Set[str],
-    global_key_map: Dict[str, KeyInfo] # Pass the loaded map
+    path_migration_info: PathMigrationInfo # Use the pre-built migration map
 ) -> Dict[Tuple[str, str], Tuple[str, Set[str]]]:
     """
-    Reads all specified tracker files and aggregates dependencies.
+    Reads all specified tracker files and aggregates dependencies, validating keys
+    found in trackers against the path migration map to ensure they represent
+    stable paths in the current state.
 
     Args:
         tracker_paths: A set of normalized paths to the tracker files.
-        global_key_map: The loaded global path -> KeyInfo map.
+        path_migration_info: The authoritative map linking paths to their
+                             old and new keys, derived from global maps.
 
     Returns:
         A dictionary where:
@@ -134,56 +143,113 @@ def aggregate_all_dependencies(
     config = ConfigManager() # Needed for priority
     get_priority = config.get_char_priority
 
-    logger.info(f"Aggregating dependencies from {len(tracker_paths)} trackers...")
+    logger.info(f"Aggregating dependencies from {len(tracker_paths)} trackers using path migration map...")
 
+    # Create helper map: old_key -> path (derived from path_migration_info for validation)
+    # We need this to map keys found in the file grid back to paths
+    old_key_to_stable_path: Dict[str, str] = {}
+    for path, (old_key, _new_key) in path_migration_info.items():
+        if old_key: # Only include paths that existed in the old state
+             if old_key in old_key_to_stable_path:
+                  # This indicates an old key was reused for different paths in the old map, error!
+                  logger.error(f"Aggregation Error: Old key '{old_key}' maps to multiple paths ('{old_key_to_stable_path[old_key]}' and '{path}') according to migration map. Inconsistent old global map?")
+                  # Continue might hide errors, maybe raise? For now, log and skip adding the duplicate.
+             else:
+                  old_key_to_stable_path[old_key] = path
+
+    processed_trackers = 0
     for tracker_path in tracker_paths:
         logger.debug(f"Processing tracker for aggregation: {os.path.basename(tracker_path)}")
         tracker_data = read_tracker_file(tracker_path) # Uses cache
-        if not tracker_data or not tracker_data.get("keys") or not tracker_data.get("grid"):
-            logger.debug(f"Skipping empty or invalid tracker: {os.path.basename(tracker_path)}")
+        grid_from_file = tracker_data.get("grid")
+        keys_from_file = tracker_data.get("keys") # Stale key -> path
+
+        if not grid_from_file or not keys_from_file:
+            logger.debug(f"Skipping empty tracker or missing keys/grid: {os.path.basename(tracker_path)}")
             continue
 
-        local_keys_map = tracker_data["keys"]
-        grid = tracker_data["grid"]
-        # Use hierarchical sort for reliable indexing
-        sorted_keys_local = sort_key_strings_hierarchically(list(local_keys_map.keys()))
-        key_to_idx_local = {k: i for i, k in enumerate(sorted_keys_local)} # Not strictly needed for this simplified extraction
+        # Get the OLD key list sorted according to the tracker file structure
+        old_keys_list_from_file = sort_key_strings_hierarchically(list(keys_from_file.keys()))
 
-        # Extract raw links directly from grid data
-        for row_key in sorted_keys_local:
-            compressed_row = grid.get(row_key)
-            if not compressed_row: continue
+        processed_rows = 0
+        skipped_unstable = 0
+        for old_row_key_from_file, compressed_row in grid_from_file.items():
+
+            # --- VALIDATION 1: Check Row Key Stability ---
+            row_path = old_key_to_stable_path.get(old_row_key_from_file)
+            if not row_path:
+                 # This old key didn't exist in the old global map or mapped to multiple paths
+                 # logger.debug(f"Agg Skip Row: Old key '{old_row_key_from_file}' from {os.path.basename(tracker_path)} not found in stable old_key_to_path map.")
+                 skipped_unstable += 1
+                 continue
+            migration_tuple_row = path_migration_info.get(row_path)
+            if not migration_tuple_row or migration_tuple_row[1] is None:
+                 # Path removed or old key was unstable globally
+                 # logger.debug(f"Agg Skip Row: Path '{row_path}' (from old key '{old_row_key_from_file}') unstable or removed.")
+                 skipped_unstable += 1
+                 continue
+            current_row_key = migration_tuple_row[1] # Get the CURRENT key
+
             try:
                 decompressed_row = decompress(compressed_row)
-                if len(decompressed_row) != len(sorted_keys_local): continue # Skip malformed rows
+                if len(decompressed_row) != len(old_keys_list_from_file):
+                     logger.warning(f"Aggregation: Row length mismatch for old key '{old_row_key_from_file}' in {os.path.basename(tracker_path)}. Skipping row.")
+                     continue
 
-                for col_idx, dep_char in enumerate(decompressed_row):
-                    col_key = sorted_keys_local[col_idx]
+                for old_col_idx, dep_char in enumerate(decompressed_row):
                     # Skip diagonal, no-dependency, empty
-                    if row_key == col_key or dep_char in (DIAGONAL_CHAR, '-', 'X'): continue
+                    if dep_char in (DIAGONAL_CHAR, EMPTY_CHAR): continue
 
-                    # --- Priority Resolution and Origin Tracking ---
-                    current_link = (row_key, col_key)
+                    if old_col_idx >= len(old_keys_list_from_file): continue # Safety
+                    old_col_key_from_file = old_keys_list_from_file[old_col_idx]
+
+                    if old_row_key_from_file == old_col_key_from_file: continue # Should be caught by DIAGONAL_CHAR check, but belts and braces
+
+                    # --- VALIDATION 2: Check Column Key Stability ---
+                    col_path = old_key_to_stable_path.get(old_col_key_from_file)
+                    if not col_path:
+                         # logger.debug(f"Agg Skip Cell: Old col key '{old_col_key_from_file}' not stable.")
+                         skipped_unstable += 1
+                         continue
+                    migration_tuple_col = path_migration_info.get(col_path)
+                    if not migration_tuple_col or migration_tuple_col[1] is None:
+                         # logger.debug(f"Agg Skip Cell: Col Path '{col_path}' unstable/removed.")
+                         skipped_unstable += 1
+                         continue
+                    current_col_key = migration_tuple_col[1] # Get the CURRENT key
+
+                    # --- Both paths are stable, process the dependency ---
+                    current_link = (current_row_key, current_col_key)
                     existing_char, existing_origins = aggregated_links.get(current_link, (None, set()))
 
                     try:
                         current_priority = get_priority(dep_char)
                         existing_priority = get_priority(existing_char) if existing_char else -1 # Assign lowest priority if non-existent
                     except KeyError as e:
-                         logger.warning(f"Invalid dependency character '{str(e)}' found in {tracker_path} for {row_key}->{col_key}. Skipping.")
+                         logger.warning(f"Invalid dependency character '{str(e)}' found in {tracker_path} for {old_row_key_from_file}->{old_col_key_from_file}. Skipping.")
                          continue
 
                     if current_priority > existing_priority:
                         # New char has higher priority, replace char and reset origins
                         aggregated_links[current_link] = (dep_char, {tracker_path})
                     elif current_priority == existing_priority:
-                        # Same priority, add tracker to origins
-                        existing_origins.add(tracker_path)
-                        aggregated_links[current_link] = (dep_char, existing_origins)
-                    # else: Lower priority, do nothing
+                        if dep_char == existing_char: # Only add origin if char is identical
+                            existing_origins.add(tracker_path)
+                            aggregated_links[current_link] = (dep_char, existing_origins)
+                        else: # Same priority, different char - new one wins, resets origins
+                            aggregated_links[current_link] = (dep_char, {tracker_path})
+                            logger.debug(f"Same priority, different char for {current_link}: old='{existing_char}', new='{dep_char}'. New char wins.")
+
+                processed_rows += 1
 
             except Exception as e:
-                logger.warning(f"Aggregation: Error processing row '{row_key}' in {os.path.basename(tracker_path)}: {e}")
+                logger.warning(f"Aggregation: Error processing row for old key '{old_row_key_from_file}' in {os.path.basename(tracker_path)}: {e}")
+        
+        if skipped_unstable > 0:
+            logger.debug(f"Aggregation for {os.path.basename(tracker_path)}: Skipped {skipped_unstable} cells/rows due to unstable/removed paths.")
+        processed_trackers += 1
 
-    logger.info(f"Aggregation complete. Found {len(aggregated_links)} unique directed links.")
+    logger.info(f"Aggregation complete. Processed {processed_trackers} trackers. Found {len(aggregated_links)} unique directed links (based on current keys for stable paths).")
     return aggregated_links
+
+# --- End of tracker_utils.py ---

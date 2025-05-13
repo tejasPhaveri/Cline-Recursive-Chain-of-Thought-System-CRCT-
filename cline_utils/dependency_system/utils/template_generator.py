@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Set
 import logging
 
+from cline_utils.dependency_system.io.tracker_io import PathMigrationInfo
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
 from cline_utils.dependency_system.utils.path_utils import get_project_root, normalize_path, is_subpath
 from cline_utils.dependency_system.core.key_manager import load_global_key_map, KeyInfo
@@ -106,15 +107,17 @@ def _get_project_name(project_root: str) -> str:
     return project_name
 
 def _archive_and_get_cycle_number(
-    project_root: str, 
-    checklist_filename_in_root: str, 
+    project_root: str,
+    checklist_filename_in_root: str,
     archive_dir_abs: str,
     config: ConfigManager,
-    global_key_map: Dict[str, KeyInfo]
+    global_key_map: Dict[str, KeyInfo], # Current global map
+    path_migration_info: PathMigrationInfo # Path migration map
 ) -> int:
     """
     Archives existing checklist, calculating and updating final coverage metrics before archiving.
     Determines the new cycle number.
+    Uses path_migration_info for calling aggregate_all_dependencies.
     """
     current_checklist_path = normalize_path(os.path.join(project_root, checklist_filename_in_root))
     last_cycle_number = 0
@@ -138,11 +141,11 @@ def _archive_and_get_cycle_number(
                     initial_coverage_val = float(match_initial_cov.group(1))
                 except ValueError:
                     logger.warning("Could not parse Initial Coverage value from checklist.")
-            
             # Recalculate current coverage (this is the "Final Coverage" for the cycle being archived)
-            code_files, doc_files = _get_code_and_doc_files(global_key_map, config, project_root) # Use existing helper
-            final_coverage_val, _ = _calculate_initial_coverage_and_gaps( # This function calculates current coverage
-                global_key_map, code_files, doc_files, config, project_root
+            code_files, doc_files = _get_code_and_doc_files(global_key_map, config, project_root)
+            # Pass path_migration_info to _calculate_initial_coverage_and_gaps
+            final_coverage_val, _ = _calculate_initial_coverage_and_gaps(
+                global_key_map, code_files, doc_files, config, project_root, path_migration_info
             )
             coverage_delta_val = final_coverage_val - initial_coverage_val
 
@@ -152,28 +155,23 @@ def _archive_and_get_cycle_number(
                 # match_obj.group(1) is "(- \*\*Final Coverage\*\*: )"
                 # match_obj.group(2) is " % of code files have doc dependencies)"
                 return f"{match_obj.group(1)}{final_coverage_val:.2f}{match_obj.group(2)}"
-
             content = re.sub(
                 r"(-\s*\*\*Final Coverage\*\*:\s*)\[FINAL_PERCENTAGE\](\s*% of code files have doc dependencies)",
-                final_coverage_repl, # Use the replacement function
-                content
+                final_coverage_repl, content
             )
-
+            
             def delta_coverage_repl(match_obj):
                 # match_obj.group(1) is "(- \*\*Coverage Delta\*\*: )"
                 # match_obj.group(2) is " % improvement)"
                 return f"{match_obj.group(1)}{coverage_delta_val:.2f}{match_obj.group(2)}"
-
             content = re.sub(
                 r"(-\s*\*\*Coverage Delta\*\*:\s*)\[COVERAGE_DELTA\](\s*% improvement)",
-                delta_coverage_repl, # Use the replacement function
-                content
+                delta_coverage_repl, content
             )
             # Write updated content back to the file before moving
             with open(current_checklist_path, 'w', encoding='utf-8') as f_update:
                 f_update.write(content)
             logger.debug(f"Updated final coverage metrics in {checklist_filename_in_root} before archiving.")
-            # --- End Calculation ---
 
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             checklist_filename_base = os.path.splitext(checklist_filename_in_root)[0]
@@ -188,23 +186,21 @@ def _archive_and_get_cycle_number(
             if os.path.exists(current_checklist_path):
                 try: os.remove(current_checklist_path)
                 except OSError as os_err: logger.warning(f"Could not remove conflicting checklist after archive error: {os_err}")
-            return 1 
+            return 1
     else:
         return 1
 
 def _get_code_and_doc_files(
-    global_key_map: Dict[str, KeyInfo], 
-    config: ConfigManager, 
+    global_key_map: Dict[str, KeyInfo],
+    config: ConfigManager,
     project_root: str
 ) -> Tuple[List[KeyInfo], List[KeyInfo]]:
     """Filters global key map for code and documentation files, respecting exclusions."""
     code_files: List[KeyInfo] = []
     doc_files: List[KeyInfo] = []
-    # Get all configured exclusions (dirs, paths, patterns)
-    excluded_dirs_config_rel = config.get_excluded_dirs()
-    # get_excluded_paths() in ConfigManager returns a list of absolute paths matching patterns and explicit exclusions
-    resolved_excluded_paths_abs = config.get_excluded_paths() 
+    resolved_excluded_paths_abs = config.get_excluded_paths()
     excluded_extensions_config = set(config.get_excluded_extensions())
+    excluded_dirs_config_rel = config.get_excluded_dirs()
     excluded_dirs_abs_set = {normalize_path(os.path.join(project_root, p)) for p in excluded_dirs_config_rel}
     # Combine all absolute exclusion paths for efficient checking
     all_specific_excluded_paths_abs = set(resolved_excluded_paths_abs)
@@ -238,18 +234,22 @@ def _get_code_and_doc_files(
     return code_files, doc_files
 
 def _calculate_initial_coverage_and_gaps(
-    global_key_map: Dict[str, KeyInfo], 
-    code_files: List[KeyInfo], 
-    doc_files: List[KeyInfo], 
-    config: ConfigManager, 
-    project_root: str
+    global_key_map: Dict[str, KeyInfo], # Current global map
+    code_files: List[KeyInfo],
+    doc_files: List[KeyInfo],
+    config: ConfigManager,
+    project_root: str,
+    path_migration_info: PathMigrationInfo # Pass the migration map
 ) -> Tuple[float, Dict[str, List[str]]]:
-    """Calculates initial documentation coverage percentage and identifies code files lacking doc dependencies."""
+    """
+    Calculates initial documentation coverage percentage and identifies code files lacking doc dependencies.
+    Uses path_migration_info for calling aggregate_all_dependencies.
+    """
     code_files_with_doc_deps_count = 0
     coverage_gaps = defaultdict(list) # module_display_name -> list of code_file_keys
 
     path_to_keyinfo_map = {ki.norm_path: ki for ki in global_key_map.values()}
-    doc_file_keys = {df.key_string for df in doc_files}
+    doc_file_keys = {df.key_string for df in doc_files} # Uses CURRENT keys
     if not code_files:
         logger.info("No code files found to calculate coverage.")
         return 100.0 if not doc_files else 0.0, {} # Or handle as appropriate
@@ -268,6 +268,7 @@ def _calculate_initial_coverage_and_gaps(
                  module_display_name = "Top-Level Files" # Or derive from root path
             coverage_gaps[module_display_name].append(cf_info.key_string)
         return 0.0, dict(sorted(coverage_gaps.items()))
+
     all_tracker_paths = find_all_tracker_paths(config, project_root)
     if not all_tracker_paths:
         logger.warning("No tracker files found. Cannot determine dependencies for coverage calculation.")
@@ -284,10 +285,22 @@ def _calculate_initial_coverage_and_gaps(
                  module_display_name = "Top-Level Files"
             coverage_gaps[module_display_name].append(cf_info.key_string)
         return 0.0, dict(sorted(coverage_gaps.items()))
-    aggregated_links = aggregate_all_dependencies(all_tracker_paths, global_key_map)
-    for code_file_info in code_files:
+
+    # Call aggregate_all_dependencies with path_migration_info
+    # The keys in aggregated_links will be CURRENT keys.
+    try:
+        aggregated_links = aggregate_all_dependencies(all_tracker_paths, path_migration_info)
+    except ValueError as ve: # Catch potential errors from aggregation
+        logger.error(f"Coverage calculation failed: Error during dependency aggregation: {ve}")
+        return 0.0, {"Error": [f"Aggregation failed: {ve}"]} # Return error indication
+    except Exception as e:
+        logger.error(f"Coverage calculation failed: Unexpected error during dependency aggregation: {e}", exc_info=True)
+        return 0.0, {"Error": [f"Unexpected aggregation error: {e}"]}
+
+    for code_file_info in code_files: # code_file_info.key_string is CURRENT key
         has_doc_dep = False
         for (source_key, target_key), (dep_char, _) in aggregated_links.items():
+            # source_key and target_key are CURRENT keys from aggregation
             if source_key == code_file_info.key_string and \
                target_key in doc_file_keys and \
                dep_char in POSITIVE_DOC_DEPENDENCY_CHARS:
@@ -306,35 +319,65 @@ def _calculate_initial_coverage_and_gaps(
             else: # File directly under a root
                  module_display_name = "Top-Level Files" # Or could try to find root name
             coverage_gaps[module_display_name].append(code_file_info.key_string)
+
     total_code_files = len(code_files)
     percentage = (code_files_with_doc_deps_count / total_code_files) * 100 if total_code_files > 0 else 0.0
     return percentage, dict(sorted(coverage_gaps.items()))
 
-def generate_final_review_checklist() -> bool:
+def generate_final_review_checklist(
+    global_key_map_param: Optional[Dict[str, KeyInfo]] = None, # For direct call flexibility
+    path_migration_info_param: Optional[PathMigrationInfo] = None # For direct call flexibility
+) -> bool:
     """
     Generates the Code-Documentation Cross-Reference Checklist.
     Archives any existing checklist and populates the new one.
+    Accepts global_key_map and path_migration_info as parameters to allow
+    being called by analyze_project with pre-computed maps.
+
     Returns True on success, False on failure.
     """
     logger.info("Starting generation of final review checklist...")
     try:
         project_root = get_project_root()
-        config = ConfigManager() 
+        config = ConfigManager()
     except Exception as e:
         logger.error(f"Error initializing project context (project_root or ConfigManager): {e}", exc_info=True)
         return False
 
-    global_key_map = load_global_key_map() # Load global map once
-    if not global_key_map:
-        logger.error("Global key map not found or failed to load. Cannot generate/update checklist.")
-        return False
+    # Use provided maps or load/build them
+    current_global_key_map: Dict[str, KeyInfo]
+    if global_key_map_param is not None:
+        current_global_key_map = global_key_map_param
+    else:
+        loaded_map = load_global_key_map()
+        if not loaded_map:
+            logger.error("Global key map not found or failed to load. Cannot generate/update checklist.")
+            return False
+        current_global_key_map = loaded_map
+
+    path_migration_info_to_use: PathMigrationInfo
+    if path_migration_info_param is not None:
+        path_migration_info_to_use = path_migration_info_param
+    else:
+        from cline_utils.dependency_system.io.tracker_io import _build_path_migration_map # Local import
+        from cline_utils.dependency_system.core.key_manager import load_old_global_key_map
+        old_global_map = load_old_global_key_map()
+        try:
+            path_migration_info_to_use = _build_path_migration_map(old_global_map, current_global_key_map)
+        except ValueError as ve:
+            logger.error(f"Failed to build path migration map for checklist generation: {ve}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error building path migration map for checklist: {e}", exc_info=True)
+            return False
+
 
     checklist_path_abs = normalize_path(os.path.join(project_root, CHECKLIST_FILENAME))
     archive_dir_abs = normalize_path(os.path.join(project_root, ARCHIVE_DIR_RELATIVE))
-    
-    # Pass config and global_key_map to _archive_and_get_cycle_number
+
+    # Pass current_global_key_map and path_migration_info_to_use
     cycle_number = _archive_and_get_cycle_number(
-        project_root, CHECKLIST_FILENAME, archive_dir_abs, config, global_key_map
+        project_root, CHECKLIST_FILENAME, archive_dir_abs, config, current_global_key_map, path_migration_info_to_use
     )
 
     project_name = _get_project_name(project_root)
@@ -344,13 +387,13 @@ def generate_final_review_checklist() -> bool:
     doc_dirs_list = config.get_doc_directories()
     code_root_dirs_str = ", ".join(sorted([normalize_path(cr) for cr in code_roots_list])) if code_roots_list else "N/A"
     doc_dirs_str = ", ".join(sorted([normalize_path(dd) for dd in doc_dirs_list])) if doc_dirs_list else "N/A"
-    code_files, doc_files = _get_code_and_doc_files(global_key_map, config, project_root)
+    code_files, doc_files = _get_code_and_doc_files(current_global_key_map, config, project_root)
     code_file_count = len(code_files)
     doc_file_count = len(doc_files)
 
-    # This calculates the coverage for the *new* checklist being generated
+    # Pass path_migration_info_to_use for coverage calculation
     initial_coverage_percentage_for_new_checklist, coverage_gaps_dict = _calculate_initial_coverage_and_gaps(
-        global_key_map, code_files, doc_files, config, project_root
+        current_global_key_map, code_files, doc_files, config, project_root, path_migration_info_to_use
     )
     coverage_analysis_rows_list = []
     if not coverage_gaps_dict:
@@ -361,7 +404,7 @@ def generate_final_review_checklist() -> bool:
             sorted_files_keys_str = ", ".join(sorted(files_without_deps_keys))
             coverage_analysis_rows_list.append(f"| {module_name} | {sorted_files_keys_str} | [TODO: Describe action] |")
     coverage_analysis_rows_str = "\n".join(coverage_analysis_rows_list) if coverage_analysis_rows_list else "| All good! | No coverage gaps identified. | Review to confirm. |"
-    
+
     template_content_to_use = CHECKLIST_TEMPLATE_CONTENT
     try:
         formatted_checklist = template_content_to_use.format(
@@ -413,13 +456,11 @@ def add_code_doc_dependency_to_checklist(
     # Construct the core part of the new row for duplicate checking (excluding justification)
     # Normalize spacing for consistent duplicate checks
     new_row_check_str = f"| {source_key_str} | {target_key_str} | {dep_type_char} |"
-    # Full new row for insertion
     new_row_to_insert = f"| {source_key_str.ljust(10)} | {target_key_str.ljust(10)} | {dep_type_char.center(15)} | [JUSTIFICATION] |"
 
     try:
         with open(checklist_path_abs, 'r+', encoding='utf-8') as f:
             content = f.read()
-            
             start_marker_idx = content.find(ADDED_DEPS_TABLE_START_MARKER)
             end_marker_idx = content.find(ADDED_DEPS_TABLE_END_MARKER)
 
@@ -427,13 +468,9 @@ def add_code_doc_dependency_to_checklist(
                 logger.error(f"Could not find or invalid markers '{ADDED_DEPS_TABLE_START_MARKER}' / '{ADDED_DEPS_TABLE_END_MARKER}' in checklist. Cannot add entry.")
                 return False
 
-            # Content before the table data, including the start marker and the line after it
-            before_table_data = content[:start_marker_idx + len(ADDED_DEPS_TABLE_START_MARKER) + 1] # +1 for newline
-            # Content after the table data, starting from the end marker
+            before_table_data = content[:start_marker_idx + len(ADDED_DEPS_TABLE_START_MARKER) + 1]
             after_table_data = content[end_marker_idx:]
-            # Existing rows are between the start marker's line and the end marker
             table_data_str = content[start_marker_idx + len(ADDED_DEPS_TABLE_START_MARKER) + 1 : end_marker_idx].strip()
-            
             existing_rows = [row.strip() for row in table_data_str.split('\n') if row.strip().startswith('|')]
 
             # Duplicate check:
@@ -444,27 +481,24 @@ def add_code_doc_dependency_to_checklist(
                     existing_row_check_str = f"| {cols[0]} | {cols[1]} | {cols[2]} |"
                     if new_row_check_str == existing_row_check_str:
                         logger.info(f"Duplicate dependency entry found in checklist, not adding: {new_row_to_insert}")
-                        return True # Considered success as the entry effectively exists
+                        return True
 
-            placeholder_row_template_part = "| [ITEM_1_KEY]" # Part of the placeholder row
-            
-            # If existing_rows contains only the placeholder, or is empty, we replace/insert.
+            placeholder_row_template_part = "| [ITEM_1_KEY]"
             if len(existing_rows) == 1 and placeholder_row_template_part in existing_rows[0]:
                 updated_table_rows_str = new_row_to_insert
                 logger.debug(f"Replacing placeholder row in checklist with: {new_row_to_insert}")
-            elif not existing_rows: # Table was empty between markers
+            elif not existing_rows:
                 updated_table_rows_str = new_row_to_insert
                 logger.debug(f"Inserting first data row into empty table: {new_row_to_insert}")
-            else: # Append to existing rows
+            else:
                 updated_table_rows_str = table_data_str + "\n" + new_row_to_insert
                 logger.debug(f"Appending new dependency row to checklist: {new_row_to_insert}")
-            
+
             final_content = before_table_data + updated_table_rows_str.strip() + "\n" + after_table_data
-            
             f.seek(0)
             f.write(final_content)
             f.truncate()
-        
+
         logger.info(f"Successfully added dependency ({source_key_str} -> {target_key_str}): {new_row_to_insert}")
         return True
     except IOError as e:
