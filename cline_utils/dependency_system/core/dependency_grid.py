@@ -272,7 +272,8 @@ def remove_dependency_from_grid(grid: Dict[str, str], source_key: str, target_ke
     new_row = row[:target_idx] + EMPTY_CHAR + row[target_idx + 1:]
     new_grid[source_key] = compress(new_row)
     invalidate_dependent_entries('grid_decompress', f"decompress:{new_grid[source_key]}")
-    invalidate_dependent_entries('grid_validation', f"validate_grid:{hash(str(sorted(new_grid.items())))}:{':'.join(keys)}")
+    invalidate_dependent_entries('grid_validation',
+                                f"validate_grid:{hash(str(sorted(new_grid.items())))}:{':'.join(sort_key_strings_hierarchically(keys))}")
     return new_grid
 
 # --- Dependency Retrieval ---
