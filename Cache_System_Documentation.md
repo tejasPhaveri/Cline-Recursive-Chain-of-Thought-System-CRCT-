@@ -94,6 +94,9 @@ def process_file_data(file_id):
 ```
 
 If the underlying file changes, functions like `check_file_modified` can trigger invalidation for caches linked to that file path.
+### Caching File Reads
+`read_file_cached` from `cline_utils.dependency_system.utils.file_utils` returns the contents of a file and stores it in the `file_contents` cache. The cache key includes the file's modification time so cached data updates automatically when the file changes. Use this during pre-action verification to avoid repeated disk reads.
+
 
 #### Manual Invalidation
 

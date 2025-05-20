@@ -73,21 +73,15 @@
         *   Re-check dependencies using `show-dependencies --key <target_file_key>` if the step involves complex interactions or if context might be stale.
         *   **CRITICAL**: Ensure you have **read and understood the relevant content (`read_file`) of the directly dependent files** identified in Section II.4. How does this step interact with those dependencies (e.g., calling functions, using data structures, implementing interfaces)? State: "Confirming understanding of interaction with dependencies `{key_1}`, `{key_2}` based on previously read files before proceeding with step."
     *   **C. Pre-Action Verification (MANDATORY for File Modifications)**: Before using tools that modify files (`replace_in_file`, `write_to_file` on existing files, `execute_command` that changes files):
-        *   Re-read the specific target file(s) for this step using `read_file`.
-        *   Generate a "Pre-Action Verification" Chain-of-Thought:
-            1.  **Intended Change**: Clearly state the modification planned for this step (e.g., "Insert function X at line Y in file Z").
-            2.  **Dependency Context Summary**: Briefly summarize how the intended change relates to the critical dependencies reviewed in III.1.B (e.g., "Function X implements interface defined in dependent file A", "Change adheres to data format expected by dependent function B").
-            3.  **Expected Current State**: Describe the specific part of the file you expect to see before the change (e.g., "Expect line Y to be empty", "Expect function signature Z to be present").
-            4.  **Actual Current State**: Note the actual state observed from the `read_file` output.
-            5.  **Validation**: Compare expected and actual state. Proceed **only if** they match reasonably AND the intended change is consistent with the dependency context summary. If validation fails, **STOP**, state the discrepancy, and re-evaluate the step, plan, or dependencies. Ask for clarification if needed.
+        *   Load the target file(s) using `read_file_cached` (automatically refreshes if the on-disk version changed).
+        *   Generate a single **Pre-Action Verification** reasoning block summarizing the intended change, relevant dependency context, the expected vs. actual code around the change, and whether validation succeeds. If any mismatch is found, **STOP** and reassess before modifying files.
         *   Example:
             ```
             Pre-Action Verification:
-            1. Intended Change: Replace line 55 in `game_logic.py` (Key: 2Ca1) with `new_score = calculate_score(data, multipliers)`.
-            2. Dependency Context Summary: `calculate_score` is imported from `scoring_utils.py` (Key: 2Cb3, dependency confirmed via show-dependencies & read_file). It expects `data` (dict) and `multipliers` (list). `game_logic.py` has access to these variables in scope.
-            3. Expected Current State: Line 55 contains the old calculation `new_score = data['base'] * 1.1`.
-            4. Actual Current State: Line 55 is `new_score = data['base'] * 1.1`.
-            5. Validation: Match confirmed. Change is consistent with dependency context. Proceeding with `replace_in_file`.
+            Intended Change: Replace line 55 in `game_logic.py` (Key: 2Ca1) with `new_score = calculate_score(data, multipliers)`.
+            Dependency Context: `calculate_score` is imported from `scoring_utils.py` (Key: 2Cb3) and expects `data` and `multipliers`.
+            Expected vs. Actual: Line 55 currently reads `new_score = data['base'] * 1.1` &matches expectation.
+            Validation: OK - proceeding with `replace_in_file`.
             ```
     *   **D. Perform Action**: Execute the action described in the step using the appropriate tool (`write_to_file`, `execute_command`, `replace_in_file`, etc.).
     *   **E. Document Results (Mini-CoT)**: Immediately after the action, record the outcome:
