@@ -172,14 +172,21 @@ def generate_embeddings(project_paths: List[str],
                  logger.warning(f"Path is not a file: {abs_file_path} for key {key_string}. Skipping read.")
                  continue
             try:
-                is_binary = False; # (Binary check unchanged)
+                is_binary = False  # (Binary check unchanged)
                 with open(abs_file_path, 'rb') as f_check:
-                    if b'\0' in f_check.read(1024): is_binary = True
-                if is_binary: logger.debug(f"Skipping binary file: {abs_file_path}"); continue
-                # Read content
-                with open(abs_file_path, 'r', encoding='utf-8') as f: file_contents[key_string] = f.read()
-            except UnicodeDecodeError: logger.debug(f"Skipping non-UTF8 file: {abs_file_path}")
-            except Exception as e: logger.warning(f"Failed to read {abs_file_path}: {e}")
+                    if b'\0' in f_check.read(1024):
+                        is_binary = True
+                if is_binary:
+                    logger.debug(f"Skipping binary file: {abs_file_path}")
+                    continue
+                from ..utils import read_file_cached
+                content = read_file_cached(abs_file_path)
+                if content is not None:
+                    file_contents[key_string] = content
+            except UnicodeDecodeError:
+                logger.debug(f"Skipping non-UTF8 file: {abs_file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to read {abs_file_path}: {e}")
 
         # --- Generate or load embeddings ---
         # <<< *** MODIFIED ITERATION AND CHECKS *** >>>

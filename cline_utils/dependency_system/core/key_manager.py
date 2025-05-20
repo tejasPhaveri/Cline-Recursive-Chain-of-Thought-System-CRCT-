@@ -15,6 +15,8 @@ import shutil # Added for renaming
 from typing import Dict, List, Tuple, Optional, Set, NamedTuple
 from collections import defaultdict
 
+from cline_utils.dependency_system.utils.cache_manager import cached
+
 # Ensure imports resolve correctly based on project structure
 try:
     from cline_utils.dependency_system.utils.path_utils import get_project_root, normalize_path
@@ -394,6 +396,10 @@ def generate_keys(root_paths: List[str], excluded_dirs: Optional[Set[str]] = Non
     unique_new_keys = list(dict.fromkeys(newly_generated_keys).keys())
     return path_to_key_info, unique_new_keys
 
+@cached(
+    "global_key_map",
+    key_func=lambda: f"global_key_map:{os.path.getmtime(os.path.join(os.path.dirname(os.path.abspath(__file__)), GLOBAL_KEY_MAP_FILENAME)) if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), GLOBAL_KEY_MAP_FILENAME)) else 'missing'}"
+)
 def load_global_key_map() -> Optional[Dict[str, KeyInfo]]:
     """
     Loads the persisted global path_to_key_info map from the JSON file
@@ -436,6 +442,10 @@ def load_global_key_map() -> Optional[Dict[str, KeyInfo]]:
         logger.exception(f"Unexpected error loading global key map from {map_path}: {e}")
         return None
 
+@cached(
+    "old_global_key_map",
+    key_func=lambda: f"old_global_key_map:{os.path.getmtime(os.path.join(os.path.dirname(os.path.abspath(__file__)), OLD_GLOBAL_KEY_MAP_FILENAME)) if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), OLD_GLOBAL_KEY_MAP_FILENAME)) else 'missing'}"
+)
 def load_old_global_key_map() -> Optional[Dict[str, KeyInfo]]:
     """Loads the persisted PREVIOUS global path_to_key_info map."""
     try:
