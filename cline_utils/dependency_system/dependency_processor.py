@@ -20,9 +20,10 @@ from cline_utils.dependency_system.core.dependency_grid import (
     PLACEHOLDER_CHAR, compress, decompress, get_char_at, set_char_at,
     add_dependency_to_grid, get_dependencies_from_grid
 )
+from cline_utils.dependency_system.core import key_manager
 from cline_utils.dependency_system.core.key_manager import (
     KeyInfo, KeyGenerationError, load_old_global_key_map, validate_key, sort_key_strings_hierarchically,
-    load_global_key_map
+    load_global_key_map, GLOBAL_KEY_MAP_FILENAME
 )
 
 # --- IO Imports ---
@@ -45,6 +46,9 @@ from cline_utils.dependency_system.utils.cache_manager import (
 )
 from cline_utils.dependency_system.utils.tracker_utils import (
     read_tracker_file, find_all_tracker_paths, aggregate_all_dependencies
+)
+from cline_utils.dependency_system.utils.dependency_snapshot import (
+    load_snapshot, save_snapshot, compute_state_hash
 )
 
 from cline_utils.dependency_system.utils.template_generator import add_code_doc_dependency_to_checklist, _get_item_type as get_item_type_for_checklist
@@ -427,6 +431,14 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
     # --- Use Utility Functions ---
     all_tracker_paths = find_all_tracker_paths(config, project_root)
     if not all_tracker_paths: print("Warning: No tracker files found.")
+
+    # --- Snapshot Check ---
+    global_map_path = normalize_path(os.path.join(os.path.dirname(os.path.abspath(key_manager.__file__)), GLOBAL_KEY_MAP_FILENAME))
+    state_hash = compute_state_hash(all_tracker_paths, global_map_path)
+    snapshot = load_snapshot(target_key_str)
+    if snapshot and snapshot.get("state_hash") == state_hash:
+        print(snapshot.get("output", ""))
+        return 0
     
     # Pass the generated path_migration_info to aggregate_all_dependencies
     aggregated_links_with_origins = aggregate_all_dependencies(
@@ -468,13 +480,14 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
         ("Semantic (Weak) ('s')", 's'), ("Depends On ('<')", '<'), ("Depended On By ('>')", '>'),
         ("Placeholders ('p')", 'p')
     ]
+    output_lines = []
     for section_title, dep_char_filter in output_sections: # Renamed dep_char to avoid conflict
-        print(f"\n{section_title}:")
+        output_lines.append(f"\n{section_title}:")
         dep_set = all_dependencies_by_type.get(dep_char_filter)
         if dep_set:
             # Define helper for hierarchical sorting
             def _hierarchical_sort_key_func(key_str_local: str): # Renamed key_str
-                KEY_PATTERN = r'\d+|\D+' 
+                KEY_PATTERN = r'\d+|\D+'
                 if not key_str_local or not isinstance(key_str_local, str): return []
                 parts = re.findall(KEY_PATTERN, key_str_local)
                 try:
@@ -492,10 +505,13 @@ def handle_show_dependencies(args: argparse.Namespace) -> int:
                         # Format origin filenames nicely
                         origin_filenames = sorted([os.path.basename(p) for p in origins])
                         origin_info = f" (In: {', '.join(origin_filenames)})"
-                # Print with optional origin info
-                print(f"  - {dep_key}: {dep_path}{origin_info}")
-        else: print("  None")
-    print("\n------------------------------------------")
+                output_lines.append(f"  - {dep_key}: {dep_path}{origin_info}")
+        else:
+            output_lines.append("  None")
+    output_lines.append("\n------------------------------------------")
+    output_str = "\n".join(output_lines)
+    print(output_str)
+    save_snapshot(target_key_str, {"state_hash": state_hash, "output": output_str})
     return 0
 
 def handle_show_keys(args: argparse.Namespace) -> int:
