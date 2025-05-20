@@ -62,10 +62,15 @@ def analyze_file(file_path: str, force: bool = False) -> Dict[str, Any]:
         file_type = util_get_file_type(norm_file_path)
         analysis_result: Dict[str, Any] = {"file_path": norm_file_path, "file_type": file_type, "imports": [], "links": []}
         try:
-            with open(norm_file_path, 'r', encoding='utf-8') as f: content = f.read()
-        except FileNotFoundError: return {"error": "File disappeared during analysis"}
-        except UnicodeDecodeError as e: return {"error": "Encoding error", "details": str(e)}
-        except Exception as e: logger.error(f"Error reading file {norm_file_path}: {e}", exc_info=True); return {"error": "File read error", "details": str(e)}
+            from ..utils import read_file_cached
+            content = read_file_cached(norm_file_path)
+            if content is None:
+                return {"error": "File disappeared during analysis"}
+        except UnicodeDecodeError as e:
+            return {"error": "Encoding error", "details": str(e)}
+        except Exception as e:
+            logger.error(f"Error reading file {norm_file_path}: {e}", exc_info=True)
+            return {"error": "File read error", "details": str(e)}
 
         if file_type == "py": _analyze_python_file(norm_file_path, content, analysis_result)
         elif file_type == "js": _analyze_javascript_file(norm_file_path, content, analysis_result)
