@@ -13,6 +13,7 @@ from cline_utils.dependency_system.core.dependency_grid import decompress, PLACE
 from cline_utils.dependency_system.core.key_manager import KeyInfo, sort_keys, get_key_from_path, sort_key_strings_hierarchically
 from cline_utils.dependency_system.utils.path_utils import is_subpath, normalize_path, join_paths, get_project_root
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
+from cline_utils.dependency_system.utils.tracker_utils import read_tracker_file_structured
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ def aggregate_dependencies_contextual(
         (target_module_path, aggregated_dependency_char) tuples.
     """
     # Import necessary functions dynamically or ensure they are in scope
-    from cline_utils.dependency_system.io.tracker_io import read_tracker_file, get_tracker_path as get_any_tracker_path
+    from cline_utils.dependency_system.io.tracker_io import get_tracker_path as get_any_tracker_path
     # Need normalize_path if not imported globally or already available
     # from cline_utils.dependency_system.utils.path_utils import normalize_path # Already imported at top
 
@@ -143,7 +144,7 @@ def aggregate_dependencies_contextual(
         processed_mini_trackers += 1
         try:
             # read_tracker_file returns data based on the *file content*, keys are strings
-            mini_data = read_tracker_file(mini_tracker_path)
+            mini_data = read_tracker_file_structured(mini_tracker_path)
             mini_grid = mini_data.get("grid", {})
             # Key definitions LOCAL to this mini-tracker: {key_string: path_string (might not be normalized)}
             mini_keys_defined_raw = mini_data.get("keys", {})

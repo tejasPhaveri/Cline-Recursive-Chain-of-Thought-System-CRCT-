@@ -17,7 +17,7 @@ from typing import Dict, List, Tuple, Any, Optional, Set
 
 # --- Core Imports ---
 from cline_utils.dependency_system.core.dependency_grid import (
-    PLACEHOLDER_CHAR, compress, decompress, get_char_at, set_char_at,
+    EMPTY_CHAR, PLACEHOLDER_CHAR, compress, decompress, get_char_at, set_char_at,
     add_dependency_to_grid, get_dependencies_from_grid
 )
 from cline_utils.dependency_system.core.key_manager import (
@@ -27,8 +27,9 @@ from cline_utils.dependency_system.core.key_manager import (
 
 # --- IO Imports ---
 from cline_utils.dependency_system.io.tracker_io import (
-    PathMigrationInfo, _build_path_migration_map, remove_key_from_tracker, merge_trackers, write_tracker_file,
-    export_tracker, update_tracker
+    PathMigrationInfo, _build_path_migration_map, remove_path_from_tracker, 
+    merge_trackers, write_tracker_file, 
+    export_tracker, update_tracker, 
 )
 
 # --- Analysis Imports ---
@@ -41,14 +42,20 @@ from cline_utils.dependency_system.utils.path_utils import (
 )
 from cline_utils.dependency_system.utils.config_manager import ConfigManager
 from cline_utils.dependency_system.utils.cache_manager import (
-    clear_all_caches, file_modified, invalidate_dependent_entries
+    clear_all_caches, file_modified, invalidate_dependent_entries 
 )
 from cline_utils.dependency_system.utils.tracker_utils import (
-    read_tracker_file, find_all_tracker_paths, aggregate_all_dependencies
+    get_key_global_instance_string,
+    read_tracker_file_structured,
+    find_all_tracker_paths, aggregate_all_dependencies,
+    read_key_definitions_from_lines, 
+    read_grid_from_lines,           
+    get_globally_resolved_key_info_for_cli,
+    resolve_key_global_instance_to_ki 
 )
 
 from cline_utils.dependency_system.utils.template_generator import add_code_doc_dependency_to_checklist, _get_item_type as get_item_type_for_checklist
-from cline_utils.dependency_system.utils.visualize_dependencies import generate_mermaid_diagram # Renamed for clarity
+from cline_utils.dependency_system.utils.visualize_dependencies import generate_mermaid_diagram
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -72,8 +79,9 @@ def _load_global_map_or_exit() -> Dict[str, KeyInfo]:
 
 def is_parent_child(key1_str: str, key2_str: str, global_map: Dict[str, KeyInfo]) -> bool:
     """Checks if two keys represent a direct parent-child directory relationship."""
-    info1 = next((info for path, info in global_map.items() if info.key_string == key1_str), None)
-    info2 = next((info for path, info in global_map.items() if info.key_string == key2_str), None)
+    info1 = next((info for info in global_map.values() if info.key_string == key1_str), None)
+    info2 = next((info for info in global_map.values() if info.key_string == key2_str), None)
+
 
     if not info1 or not info2:
         logger.debug(f"is_parent_child: Could not find KeyInfo for '{key1_str if not info1 else ''}' or '{key2_str if not info2 else ''}'. Returning False.")
@@ -94,7 +102,7 @@ def is_parent_child(key1_str: str, key2_str: str, global_map: Dict[str, KeyInfo]
 
 # --- Command Handlers ---
 
-def command_handler_analyze_file(args):
+def command_handler_analyze_file(args: argparse.Namespace) -> int:
     """Handle the analyze-file command."""
     import json
     try:
@@ -108,7 +116,7 @@ def command_handler_analyze_file(args):
         return 0
     except Exception as e: print(f"Error analyzing file: {str(e)}"); return 1
 
-def command_handler_analyze_project(args):
+def command_handler_analyze_project(args: argparse.Namespace) -> int:
     """Handle the analyze-project command."""
     import json
     try:
@@ -117,8 +125,9 @@ def command_handler_analyze_project(args):
         if not os.path.isdir(abs_project_root): print(f"Error: Project directory not found: {abs_project_root}"); return 1
         original_cwd = os.getcwd()
         if abs_project_root != normalize_path(original_cwd):
-             logger.info(f"Changing CWD to: {abs_project_root}"); os.chdir(abs_project_root)
-             # ConfigManager.initialize(force=True) # Re-init if CWD matters for config finding
+            logger.info(f"Temporarily changing CWD from '{original_cwd}' to project root: '{abs_project_root}' for analysis.")
+            os.chdir(abs_project_root)
+            ConfigManager()._load_config() 
 
         logger.debug(f"Analyzing project: {abs_project_root}, force_analysis={args.force_analysis}, force_embeddings={args.force_embeddings}")
         results = analyze_project(force_analysis=args.force_analysis, force_embeddings=args.force_embeddings)
@@ -129,14 +138,20 @@ def command_handler_analyze_project(args):
             output_dir = os.path.dirname(output_path_abs); os.makedirs(output_dir, exist_ok=True) if output_dir else None
             with open(output_path_abs, 'w', encoding='utf-8') as f: json.dump(results, f, indent=2)
             print(f"Analysis results saved to {output_path_abs}")
-        else: print("Analysis complete. Results not printed (use --output to save).")
-        return 0
+        elif results.get("status") == "success":
+            print("Project analysis completed successfully. Results not saved to file (use --output).")
+
+        return 0 if results.get("status") == "success" or results.get("status") == "warning" else 1
     except Exception as e:
-        logger.error(f"Error analyzing project: {str(e)}", exc_info=True); print(f"Error analyzing project: {str(e)}"); return 1
+        logger.error(f"Error analyzing project: {str(e)}", exc_info=True)
+        print(f"Error analyzing project: {str(e)}")
+        return 1
     finally:
         if 'original_cwd' in locals() and normalize_path(os.getcwd()) != normalize_path(original_cwd):
-             logger.info(f"Changing CWD back to: {original_cwd}"); os.chdir(original_cwd)
-             # ConfigManager.initialize(force=True) # Re-init if needed
+             logger.info(f"Changing CWD back to original: {original_cwd}")
+             os.chdir(original_cwd)
+             ConfigManager()._load_config() 
+
 
 def handle_compress(args: argparse.Namespace) -> int:
     """Handle the compress command."""
@@ -154,222 +169,336 @@ def handle_get_char(args: argparse.Namespace) -> int:
     except IndexError: logger.error("Index out of range"); print("Error: Index out of range"); return 1
     except Exception as e: logger.error(f"Error get_char: {e}"); print(f"Error: {e}"); return 1
 
-def handle_set_char(args: argparse.Namespace) -> int:
-    """Handle the set_char command."""
+def handle_set_char(args: argparse.Namespace) -> int: 
+    # --- ADDED CRITICAL WARNING ---
+    critical_message = ("CRITICAL WARNING: The 'set_char' command is DEPRECATED and EXTREMELY DANGEROUS "
+                        "with the current tracker format. It operates on an outdated understanding of grid structure "
+                    "and can EASILY CORRUPT tracker files. It assumes the key you provide uniquely identifies a row, "
+                    "and the index refers to an Nth unique key. This is no longer true. "
+                        "USE 'add-dependency --tracker <file> --source-key <KEY#GI> --target-key <KEY#GI> --dep-type <char>' INSTEAD "
+                        "for targeted changes. PROCEEDING WITH 'set_char' IS AT YOUR OWN RISK AND LIKELY TO BREAK THINGS. "
+                        "This command will attempt a best-effort conversion but is not guaranteed to be safe or accurate.")
+    logger.critical(critical_message)
+    print(critical_message)
+    # --- END OF ADDED CRITICAL WARNING ---
+    
     try:
-        tracker_data = read_tracker_file(args.tracker_file)
-        if not tracker_data or not tracker_data.get("keys"): print(f"Error: Could not read tracker: {args.tracker_file}"); return 1
-        if args.key not in tracker_data["keys"]: print(f"Error: Key {args.key} not found"); return 1
-        sorted_keys = sort_key_strings_hierarchically(list(tracker_data["keys"].keys())) # Use hierarchical sort
-        # Check index validity against sorted list length
-        if not (0 <= args.index < len(sorted_keys)): print(f"Error: Index {args.index} out of range for {len(sorted_keys)} keys."); return 1
-        # Check char validity (optional, could rely on set_char_at)
-        # if len(args.char) != 1: print("Error: Character must be a single character."); return 1
+        tracker_file_path = normalize_path(args.tracker_file)
+        if not os.path.exists(tracker_file_path):
+            print(f"Error: Tracker file not found: {tracker_file_path}"); return 1
 
-        row_str = tracker_data["grid"].get(args.key, "")
-        if not row_str: logger.warning(f"Row for key '{args.key}' missing. Initializing."); row_str = compress('p' * len(sorted_keys))
-
-        updated_compressed_row = set_char_at(row_str, args.index, args.char)
-        tracker_data["grid"][args.key] = updated_compressed_row
-        tracker_data["last_grid_edit"] = f"Set {args.key}[{args.index}] to {args.char}"
-        success = write_tracker_file(args.tracker_file, tracker_data["keys"], tracker_data["grid"], tracker_data.get("last_key_edit", ""), tracker_data["last_grid_edit"])
-        if success: print(f"Set char at index {args.index} to '{args.char}' for key {args.key} in {args.tracker_file}"); return 0
-        else: print(f"Error: Failed write to {args.tracker_file}"); return 1
-    except IndexError: print(f"Error: Index {args.index} out of range."); return 1
-    except ValueError as e: print(f"Error: {e}"); return 1
-    except Exception as e: logger.error(f"Error set_char: {e}", exc_info=True); print(f"Error: {e}"); return 1
-
-def handle_remove_key(args: argparse.Namespace) -> int:
-    """Handle the remove-key command."""
-    try:
-        # Call the updated tracker_io function
-        remove_key_from_tracker(args.tracker_file, args.key)
-        print(f"Removed key '{args.key}' from tracker '{args.tracker_file}'")
-        # Invalidate cache for the modified tracker
-        invalidate_dependent_entries('tracker_data', f"tracker_data:{normalize_path(args.tracker_file)}:.*")
-        # Broader invalidation might be needed if other caches depend on grid structure
-        invalidate_dependent_entries('grid_decompress', '.*'); invalidate_dependent_entries('grid_validation', '.*'); invalidate_dependent_entries('grid_dependencies', '.*')
-        return 0
-    except FileNotFoundError as e: print(f"Error: {e}"); return 1
-    except ValueError as e: print(f"Error: {e}"); return 1 # e.g., key not found in tracker
-    except Exception as e:
-        logger.error(f"Failed to remove key: {str(e)}", exc_info=True); print(f"Error: {e}"); return 1
-
-def handle_add_dependency(args: argparse.Namespace) -> int:
-    """Handle the add-dependency command. Allows adding foreign keys to mini-trackers."""
-    tracker_path = normalize_path(args.tracker)
-    is_mini_tracker = tracker_path.endswith("_module.md")
-    source_key_str = args.source_key # Renamed for clarity
-    target_keys_str_list = args.target_key # Renamed for clarity
-    dep_type = args.dep_type
-    # Dependency type validation
-    ALLOWED_DEP_TYPES = {'<', '>', 'x', 'd', 'o', 'n', 'p', 's', 'S'}
-    logger.info(f"Attempting to add dependency: {source_key_str} -> {target_keys_str_list} ({dep_type}) in tracker {tracker_path}")
-
-    # --- Basic Validation ---
-    if dep_type not in ALLOWED_DEP_TYPES:
-        print(f"Error: Invalid dep type '{dep_type}'. Allowed: {', '.join(sorted(list(ALLOWED_DEP_TYPES)))}")
-        return 1
-
-    # --- Load Local Tracker Data ---
-    tracker_data = read_tracker_file(tracker_path)
-    local_keys_map = {} # key_string -> path_string
-    if tracker_data and tracker_data.get("keys"):
-        local_keys_map = tracker_data.get("keys", {})
-    elif not is_mini_tracker: # For main/doc, tracker must exist with keys
-        print(f"Error: Could not read tracker or no keys found: {tracker_path}")
-        return 1
-    # If it's a mini-tracker and doesn't exist, update_tracker will handle creation.
-
-    # --- Load global map and config (needed for item type and checklist) ---
-    # Load ONCE and use this instance throughout the function.
-    loaded_global_path_to_key_info = _load_global_map_or_exit() 
-    if loaded_global_path_to_key_info is None: # Safeguard, though _load_global_map_or_exit should exit
-        logger.critical("handle_add_dependency: global_path_to_key_info is None after _load_global_map_or_exit.")
-        print("Critical Error: Global key map could not be loaded. Aborting add-dependency.", file=sys.stderr)
-        return 1
+        with open(tracker_file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
         
-    config = ConfigManager()
-    project_root = get_project_root() # Needed by get_item_type_for_checklist
+        # Use tracker_io's parsing functions
+        defs_pairs = read_key_definitions_from_lines(lines) 
+        _grid_hdrs, grid_rows_list = read_grid_from_lines(lines) 
 
-    # Get KeyInfo for source using the loaded map
-    source_key_info = next((info for info in loaded_global_path_to_key_info.values() if info.key_string == source_key_str), None)
-    if not source_key_info:
-        print(f"Error: Source key '{source_key_str}' not found in global key map.")
-        return 1
-    source_item_type = get_item_type_for_checklist(source_key_info.norm_path, config, project_root)
-
-    # --- Process Target Keys ---
-    internal_changes = [] # List of (target_key, dep_type) for local targets
-    foreign_adds = []     # List of (target_key, dep_type) for valid foreign targets (mini-trackers only)
-    checklist_updates_pending = [] # Store (source_key, target_key, dep_type) for checklist
-
-    for target_key_str in target_keys_str_list:
-        if target_key_str == source_key_str:
-             logger.warning(f"Skipping self-dependency: {source_key_str} -> {target_key_str}")
-             continue
-
-        # Use the 'loaded_global_path_to_key_info' which holds the actual map
-        target_key_info = next((info for info in loaded_global_path_to_key_info.values() if info.key_string == target_key_str), None)
-        if not target_key_info:
-            print(f"Error: Target key '{target_key_str}' not found in global key map. Cannot add dependency.")
-            return 1 
+        # Find the first definition matching args.key to get its path and original index
+        source_row_original_idx = -1
+        source_path_targetted = None
+        # The key from args.key is a KEY_LABEL from the tracker file (could be KEY or KEY#GI)
+        for idx, (k_label_in_file, p_str) in enumerate(defs_pairs):
+            if k_label_in_file == args.key:
+                source_row_original_idx = idx
+                source_path_targetted = p_str
+                break
         
-        target_item_type = get_item_type_for_checklist(target_key_info.norm_path, config, project_root)
-
-        # Check if this is a code-doc or doc-code link
-        if (source_item_type == "code" and target_item_type == "doc") or \
-           (source_item_type == "doc" and target_item_type == "code"):
-            checklist_updates_pending.append((source_key_str, target_key_str, dep_type))
-            logger.info(f"Identified code-doc link for checklist: {source_key_str} ({source_item_type}) -> {target_key_str} ({target_item_type})")
-
-
-        if target_key_str in local_keys_map:
-            internal_changes.append((target_key_str, dep_type))
-            logger.debug(f"Target '{target_key_str}' found locally. Queued for internal update.")
-        elif is_mini_tracker:
-            # No need to reload or check global_map_loaded anymore.
-            # 'loaded_global_path_to_key_info' is already available and verified.
-            # The target_key_info check above already confirms its global existence.
-            foreign_adds.append((target_key_str, dep_type))
-            logger.info(f"Target '{target_key_str}' is valid globally. Queued for foreign key addition to mini-tracker.")
-        else:
-            print(f"Error: Target key '{target_key_str}' not found in tracker '{tracker_path}' (and it's not a mini-tracker allowing foreign key addition).")
+        if source_row_original_idx == -1 or source_path_targetted is None:
+            print(f"Error: Source key label '{args.key}' not found in tracker definitions.")
+            return 1
+        
+        if source_row_original_idx >= len(grid_rows_list):
+            print(f"Error: Grid data for source key label '{args.key}' (def index {source_row_original_idx}) seems missing or tracker is corrupt.")
             return 1
 
-    # --- Combine all changes ---
-    all_targets_for_source = internal_changes + foreign_adds
-    if not all_targets_for_source and not checklist_updates_pending: # Check if anything to do for tracker OR checklist
-        print("No valid dependencies specified or identified to apply to tracker or checklist.")
+        target_col_logical_index = args.index # This index refers to the Nth definition in the *original* file
+        if not (0 <= target_col_logical_index < len(defs_pairs)):
+            print(f"Error: Target column index {target_col_logical_index} is out of range for {len(defs_pairs)} definitions.")
+            return 1
+        
+        target_path_targetted = defs_pairs[target_col_logical_index][1]
+        target_key_label_targetted = defs_pairs[target_col_logical_index][0]
+
+
+        print(f"\n--- Attempting to set relationship for paths (via low-level 'set_char' command) ---")
+        print(f"  Source (from tracker def): '{args.key}' (Path: {source_path_targetted})")
+        print(f"  Target (from tracker def): '{target_key_label_targetted}' (Path: {target_path_targetted}) at original column index {target_col_logical_index}")
+        print(f"  New Char to set: '{args.char}'")
+        print(f"-------------------------------------------------------------------------------------\n")
+
+
+        global_map = _load_global_map_or_exit()
+        
+        # Find the KeyInfo for source and target paths to get their current global keys
+        src_ki_global = global_map.get(source_path_targetted)
+        tgt_ki_global = global_map.get(target_path_targetted)
+        
+        if not src_ki_global:
+            print(f"Error: Source path '{source_path_targetted}' (from key '{args.key}') not found in current global map. Aborting 'set_char'.")
+            return 1
+        if not tgt_ki_global:
+            print(f"Error: Target path '{target_path_targetted}' (from target key label '{target_key_label_targetted}') not found in current global map. Aborting 'set_char'.")
+            return 1
+
+        # Construct KEY#GI strings for the suggestion
+        source_key_for_sugg = get_key_global_instance_string(src_ki_global, global_map)
+        target_key_for_sugg = get_key_global_instance_string(tgt_ki_global, global_map)
+
+        if not source_key_for_sugg or not target_key_for_sugg:
+            print("Error: Could not determine KEY#GlobalInstance for source or target. Aborting 'set_char'.")
+            return 1
+
+        suggestions_for_set_char = {source_key_for_sugg: [(target_key_for_sugg, args.char)]}
+        
+        is_mini = tracker_file_path.endswith("_module.md")
+        tracker_type_val = "mini" if is_mini else ("doc" if "doc_tracker.md" in os.path.basename(tracker_file_path) else "main")
+        f_to_m_map = {_info.norm_path: _info.parent_path for _info in global_map.values() if not _info.is_directory and _info.parent_path}
+
+        update_tracker(
+            output_file_suggestion=tracker_file_path,
+            path_to_key_info=global_map,
+            tracker_type=tracker_type_val,
+            suggestions_external=suggestions_for_set_char, 
+            file_to_module=f_to_m_map,
+            force_apply_suggestions=True # Force this specific change
+        )
+        print(f"Applied 'set_char' for source '{args.key}' targeting original column index {args.index} with char '{args.char}' "
+              f"in {tracker_file_path} via forced update. VERIFY THE RESULT CAREFULLY in the tracker file.")
         return 0
 
-    suggestions_for_update = {source_key_str: all_targets_for_source} if all_targets_for_source else None # Pass None if list is empty
+    except Exception as e: 
+        logger.error(f"Error during 'set_char' for {args.tracker_file}: {e}", exc_info=True)
+        print(f"Error during 'set_char': {e}. The tracker might be in an inconsistent state.")
+        return 1
+
+
+def handle_remove_key(args: argparse.Namespace) -> int: 
+    """Handle the remove-key command by resolving key to path and calling remove_path_from_tracker."""
+    tracker_file_path = normalize_path(args.tracker_file)
+    key_to_remove_str_arg = args.key # This is the KEY_LABEL from the tracker file, could be KEY or KEY#GI
     
-    # Generate file_to_module map using the correctly loaded global map
-    file_to_module_map = {
-        info.norm_path: info.parent_path
-        for info in loaded_global_path_to_key_info.values() # Use the loaded map
-        if not info.is_directory and info.parent_path
-    }
+    logger.info(f"CLI remove-key: Attempting to remove key label '{key_to_remove_str_arg}' from tracker '{tracker_file_path}'.")
 
-    # --- Call update_tracker for ALL cases (mini, main, doc) ---
-    # Let update_tracker handle type determination, reading, writing, content preservation
+    if not os.path.exists(tracker_file_path):
+        print(f"Error: Tracker file not found: {tracker_file_path}"); return 1
+
+    try: 
+        with open(tracker_file_path, "r", encoding="utf-8") as f: lines = f.readlines()
+        definitions_in_tracker = read_key_definitions_from_lines(lines) # List[Tuple[key_label_in_file, path_str_in_file]]
+    except Exception as e_read: print(f"Error reading tracker file {tracker_file_path}: {e_read}"); return 1
+
+    # Find all paths associated with the given key_label in this tracker
+    matching_paths_for_key_label: List[str] = [
+        p_str for k_label, p_str in definitions_in_tracker if k_label == key_to_remove_str_arg
+    ]
+    
+    if not matching_paths_for_key_label:
+        print(f"Error: Key label '{key_to_remove_str_arg}' not found in definitions of tracker '{tracker_file_path}'."); return 1
+    
+    path_to_remove_final: str
+    if len(matching_paths_for_key_label) == 1:
+        path_to_remove_final = matching_paths_for_key_label[0]
+        logger.info(f"Key label '{key_to_remove_str_arg}' uniquely maps to path '{path_to_remove_final}' in this tracker.")
+    else: 
+        # This case should be rare if display keys (KEY#GI) are used correctly in trackers for duplicates.
+        # If a base KEY is used as a label and it's ambiguous *within this tracker's definitions*, it's an issue.
+        print(f"Error: Key label '{key_to_remove_str_arg}' is ambiguous within tracker '{tracker_file_path}'. It maps to multiple paths:")
+        for i, p_match_ambig in enumerate(matching_paths_for_key_label): 
+            print(f"  [{i+1}] {p_match_ambig}")
+        print("This indicates an inconsistency in the tracker file or the key label provided. ")
+        print("If trying to remove a globally duplicated key, ensure you are using its unique path or a unique label from the tracker.")
+        return 1
+
     try:
-        if suggestions_for_update: # Only call update_tracker if there are tracker changes
-            logger.info(f"Calling update_tracker for {tracker_path} (Force Apply: True)")
-            update_tracker(
-                output_file_suggestion=tracker_path,
-                path_to_key_info=loaded_global_path_to_key_info, # Pass the loaded map
-                tracker_type="mini" if is_mini_tracker else ("doc" if "doc_tracker.md" in tracker_path else "main"),
-                suggestions=suggestions_for_update,
-                file_to_module=file_to_module_map,
-                new_keys=None,
-                force_apply_suggestions=True 
-            )
-            print(f"Successfully updated tracker {tracker_path} with dependencies.")
-        else:
-            logger.info(f"No direct tracker updates needed for {tracker_path}, but proceeding with checklist updates if any.")
+        # remove_path_from_tracker expects the actual path string
+        remove_path_from_tracker(tracker_file_path, path_to_remove_final) 
+        print(f"Successfully initiated removal of path '{path_to_remove_final}' (associated with key label '{key_to_remove_str_arg}') from tracker '{tracker_file_path}'.")
+        return 0
+    except FileNotFoundError as e_fnf_rem: print(f"Error during removal: {e_fnf_rem}"); return 1
+    except ValueError as e_val_rem: print(f"Error during removal: {e_val_rem}"); return 1 
+    except Exception as e_rem_generic:
+        logger.error(f"Failed to remove path '{path_to_remove_final}': {str(e_rem_generic)}", exc_info=True)
+        print(f"Error removing path: {e_rem_generic}")
+        return 1
 
-        # After successfully updating the tracker (or if no tracker update was needed but checklist is), update checklist
+def handle_add_dependency(args: argparse.Namespace) -> int:
+    """Handle the add-dependency command using globally-referenced key instances. Allows adding foreign keys to mini-trackers."""
+    tracker_path = normalize_path(args.tracker)
+    source_key_arg_raw: str = args.source_key
+    target_keys_arg_raw: List[str] = args.target_key
+    dep_type: str = args.dep_type
+
+    config = ConfigManager() 
+    ALLOWED_DEP_TYPES = config.get_allowed_dependency_chars() + [PLACEHOLDER_CHAR, EMPTY_CHAR] 
+    if dep_type not in ALLOWED_DEP_TYPES:
+        print(f"Error: Invalid dependency type '{dep_type}'. Allowed: {ALLOWED_DEP_TYPES}")
+        return 1
+
+    logger.info(f"CLI add-dependency (Global Instance Mode): User input: {source_key_arg_raw} -> {target_keys_arg_raw} ('{dep_type}') in {tracker_path}")
+
+    # Tracker existence check (allow non-existent for mini-trackers as update_tracker can create them)
+    if not os.path.exists(tracker_path) and not tracker_path.endswith("_module.md"):
+        logger.error(f"Tracker file '{tracker_path}' does not exist and is not a mini-tracker. Cannot add dependency.")
+        print(f"Error: Tracker file '{tracker_path}' not found.")
+        return 1
+    elif not os.path.exists(tracker_path): # Mini-tracker that doesn't exist yet
+         logger.warning(f"Tracker file '{tracker_path}' does not exist. `update_tracker` will attempt to create it if it's a mini-tracker.")
+
+    global_map = _load_global_map_or_exit() # This is path_to_key_info
+    
+    # --- Resolve Source Key (Globally) ---
+    src_parts = source_key_arg_raw.split('#')
+    src_base_key_str = src_parts[0]
+    src_user_global_instance_num: Optional[int] = None
+    if len(src_parts) > 1:
+        try: src_user_global_instance_num = int(src_parts[1])
+        except ValueError: 
+            print(f"Error: Invalid instance number format in source key '{source_key_arg_raw}'. Must be '#<number>'.")
+            return 1
+    
+    resolved_source_ki = get_globally_resolved_key_info_for_cli(src_base_key_str, src_user_global_instance_num, global_map, "source")
+    if not resolved_source_ki:
+        return 1 
+        
+    final_source_key_for_suggestion = get_key_global_instance_string(resolved_source_ki, global_map)
+    if not final_source_key_for_suggestion: # Should not happen if resolved_source_ki is valid
+        logger.error(f"Logic error: Could not get KEY#GI for resolved source KI: {resolved_source_ki}")
+        print("Internal error resolving source key instance.")
+        return 1
+    logger.info(f"Resolved source for suggestion: '{final_source_key_for_suggestion}' (Path: {resolved_source_ki.norm_path})")
+    
+    # --- Resolve Target Keys (Globally) & Prepare for Checklist ---
+    final_target_keys_for_suggestion_list: List[Tuple[str, str]] = []
+    checklist_updates_pending: List[Tuple[str,str,str,str,str]] = [] 
+    project_root = get_project_root()
+
+    for tgt_key_arg_item_raw in target_keys_arg_raw:
+        tgt_parts = tgt_key_arg_item_raw.split('#')
+        tgt_base_key_str = tgt_parts[0]
+        tgt_user_global_instance_num: Optional[int] = None
+        if len(tgt_parts) > 1:
+            try: tgt_user_global_instance_num = int(tgt_parts[1])
+            except ValueError: 
+                print(f"Error: Invalid instance number format in target key '{tgt_key_arg_item_raw}'. Skipping this target.")
+                continue
+        
+        resolved_target_ki = get_globally_resolved_key_info_for_cli(tgt_base_key_str, tgt_user_global_instance_num, global_map, "target")
+        if not resolved_target_ki:
+            continue 
+
+        final_target_key_for_suggestion = get_key_global_instance_string(resolved_target_ki, global_map)
+        if not final_target_key_for_suggestion: # Should not happen
+            logger.error(f"Logic error: Could not get KEY#GI for resolved target KI: {resolved_target_ki}")
+            print(f"Internal error resolving target key instance for '{tgt_key_arg_item_raw}'.")
+            continue 
+        logger.info(f"Resolved target for suggestion: '{final_target_key_for_suggestion}' (Path: {resolved_target_ki.norm_path})")
+
+        # Check for self-dependency using the resolved global paths
+        if resolved_source_ki.norm_path == resolved_target_ki.norm_path:
+            logger.warning(f"Skipping self-dependency (same global path): {final_source_key_for_suggestion} to {final_target_key_for_suggestion}")
+            continue
+        
+        final_target_keys_for_suggestion_list.append((final_target_key_for_suggestion, dep_type))
+
+        # For checklist (using globally resolved KeyInfo objects' base keys and paths)
+        src_item_type_chk = get_item_type_for_checklist(resolved_source_ki.norm_path, config, project_root)
+        tgt_item_type_chk = get_item_type_for_checklist(resolved_target_ki.norm_path, config, project_root)
+        if (src_item_type_chk == "code" and tgt_item_type_chk == "doc") or \
+           (src_item_type_chk == "doc" and tgt_item_type_chk == "code"):
+            checklist_updates_pending.append((
+                resolved_source_ki.key_string, resolved_source_ki.norm_path, 
+                resolved_target_ki.key_string, resolved_target_ki.norm_path,
+                dep_type
+            ))
+
+    if not final_target_keys_for_suggestion_list and not checklist_updates_pending:
+        print("No valid dependencies resolved to apply to tracker or checklist after validation and ambiguity checks.")
+        return 0
+
+    suggestions_for_update_tracker: Optional[Dict[str, List[Tuple[str,str]]]] = None
+    if final_target_keys_for_suggestion_list:
+        suggestions_for_update_tracker = {final_source_key_for_suggestion: final_target_keys_for_suggestion_list}
+    
+    file_to_module_map = {info.norm_path: info.parent_path for info in global_map.values() if not info.is_directory and info.parent_path}
+    is_mini_add = tracker_path.endswith("_module.md")
+    # Check basename for doc_tracker.md to correctly identify tracker type
+    tracker_type_val_add = "mini" if is_mini_add else ("doc" if "doc_tracker.md" in os.path.basename(tracker_path) else "main")
+
+    try:
+        if suggestions_for_update_tracker: 
+            logger.info(f"Calling update_tracker for '{tracker_path}' with globally-instanced suggestions: {suggestions_for_update_tracker} (Force Apply: True)")
+            update_tracker( 
+                output_file_suggestion=tracker_path,
+                path_to_key_info=global_map, 
+                tracker_type=tracker_type_val_add,
+                suggestions_external=suggestions_for_update_tracker, 
+                file_to_module=file_to_module_map,
+                force_apply_suggestions=True 
+                # new_keys, keys_to_explicitly_remove, use_old_map_for_migration are not needed for simple add
+            )
+            print(f"Successfully processed dependency addition for tracker {tracker_path}.")
+        else:
+            logger.info(f"No direct tracker updates to apply for {tracker_path} based on CLI input (possibly all targets skipped or invalid).")
+
         if checklist_updates_pending:
             logger.info(f"Attempting to update checklist with {len(checklist_updates_pending)} code-doc dependencies.")
-            all_checklist_adds_successful = True
-            for src_k, tgt_k, dep_t in checklist_updates_pending:
-                if not add_code_doc_dependency_to_checklist(src_k, tgt_k, dep_t):
-                    all_checklist_adds_successful = False
-                    logger.error(f"Failed to add {src_k} -> {tgt_k} ({dep_t}) to checklist.")
+            all_checklist_ok_add = True
+            for src_k_c, src_p_c, tgt_k_c, tgt_p_c, dep_t_c in checklist_updates_pending:
+                # Pass base key strings to checklist function
+                if not add_code_doc_dependency_to_checklist(src_k_c, tgt_k_c, dep_t_c): 
+                    all_checklist_ok_add = False
+                    logger.error(f"Failed to add {src_k_c} ('{src_p_c}') -> {tgt_k_c} ('{tgt_p_c}') with type '{dep_t_c}' to review checklist.")
                 else:
-                    print(f"Added dependency {src_k} -> {tgt_k} ({dep_t}) to review checklist.")
-            if not all_checklist_adds_successful:
-                print("Warning: Some code-doc dependencies could not be added to the review checklist.")
-                # Optionally, change exit code or overall status if this is critical
-        
+                    logger.info(f"Added/Updated dependency {src_k_c} ('{src_p_c}') -> {tgt_k_c} ('{tgt_p_c}') with type '{dep_t_c}' in review checklist.")
+            if not all_checklist_ok_add:
+                print("Warning: Some code-doc dependencies could not be added/updated in the review checklist.")
         return 0
-    except Exception as e:
-        logger.error(f"Error during add-dependency processing for {tracker_path}: {e}", exc_info=True)
-        print(f"Error processing add-dependency for {tracker_path}: {e}")
+    except Exception as e_add_dep_proc:
+        logger.error(f"Error processing add-dependency for '{tracker_path}': {e_add_dep_proc}", exc_info=True)
+        print(f"Error processing add-dependency for '{tracker_path}': {e_add_dep_proc}")
         return 1
 
 def handle_merge_trackers(args: argparse.Namespace) -> int:
     """Handle the merge-trackers command."""
     try:
-        primary_tracker_path = normalize_path(args.primary_tracker_path); secondary_tracker_path = normalize_path(args.secondary_tracker_path)
-        output_path = normalize_path(args.output) if args.output else primary_tracker_path
-        merged_data = merge_trackers(primary_tracker_path, secondary_tracker_path, output_path)
-        if merged_data: print(f"Merged trackers into {output_path}. Total keys: {len(merged_data.get('keys', {}))}"); return 0
-        else: print("Error merging trackers."); return 1
-    except Exception as e: logger.exception(f"Failed merge: {e}"); print(f"Error: {e}"); return 1
+        primary_path = normalize_path(args.primary_tracker_path)
+        secondary_path = normalize_path(args.secondary_tracker_path)
+        output_p = normalize_path(args.output) if args.output else primary_path
+        
+        merged_result_data = merge_trackers(primary_path, secondary_path, output_p)
+        
+        if merged_result_data and isinstance(merged_result_data, dict):
+            print(f"Merged trackers into {output_p}. Total items in merged definitions: {len(merged_result_data.get('key_info_list', []))}")
+            return 0
+        else: 
+            print(f"Error merging trackers. `merge_trackers` returned: {merged_result_data}"); return 1
+    except Exception as e_merge: logger.exception(f"Failed merge: {e_merge}"); print(f"Error: {e_merge}"); return 1
 
-def handle_clear_caches(args: argparse.Namespace) -> int:
-    """Handle the clear-caches command."""
-    try:
-        clear_all_caches()
-        print("All caches cleared.")
-        return 0
-    except Exception as e:
-        logger.exception(f"Error clearing caches: {e}")
-        print(f"Error clearing caches: {e}")
-        return 1
+
+def handle_clear_caches(args: argparse.Namespace) -> int: 
+    try: clear_all_caches(); print("All caches cleared."); return 0
+    except Exception as e: logger.exception(f"Error clearing caches: {e}"); print(f"Error: {e}"); return 1
+
 
 def handle_export_tracker(args: argparse.Namespace) -> int:
     """Handle the export-tracker command."""
     try:
-        output_path = args.output or os.path.splitext(args.tracker_file)[0] + '.' + args.format
-        result = export_tracker(args.tracker_file, args.format, output_path)
-        if isinstance(result, str) and result.startswith("Error:"): # Check if export returned an error string
-            print(result); return 1
-        print(f"Tracker exported to {output_path}"); return 0
-    except Exception as e: logger.exception(f"Error export_tracker: {e}"); print(f"Error: {e}"); return 1
+        export_result_path_or_msg = export_tracker(args.tracker_file, args.format, args.output)
+        if export_result_path_or_msg.startswith("Error:"):
+            print(export_result_path_or_msg); return 1
+        print(f"Tracker exported to {export_result_path_or_msg}"); return 0
+    except Exception as e_export: logger.exception(f"Error export_tracker: {e_export}"); print(f"Error: {e_export}"); return 1
+
 
 def handle_update_config(args: argparse.Namespace) -> int:
     """Handle the update-config command."""
     config_manager = ConfigManager()
     try:
-        # Attempt to parse value as JSON (allows lists/dicts), fall back to string
-        try: value = json.loads(args.value)
-        except json.JSONDecodeError: value = args.value
-        success = config_manager.update_config_setting(args.key, value)
-        if success: print(f"Updated config: {args.key} = {value}"); return 0
+        try: value_parsed = json.loads(args.value)
+        except json.JSONDecodeError: value_parsed = args.value
+        success = config_manager.update_config_setting(args.key, value_parsed)
+        if success: print(f"Updated config: {args.key} = {value_parsed}"); return 0
         else: print(f"Error: Failed update config (key '{args.key}' invalid?)."); return 1
     except Exception as e: logger.exception(f"Error update_config: {e}"); print(f"Error: {e}"); return 1
 
@@ -384,117 +513,113 @@ def handle_reset_config(args: argparse.Namespace) -> int:
 
 def handle_show_dependencies(args: argparse.Namespace) -> int:
     """Handle the show-dependencies command using the contextual key system."""
-    target_key_str = args.key
-    logger.info(f"Showing dependencies for key string: {target_key_str}")
+    user_provided_key_arg: str = args.key # This could be "KEY" or "KEY#GI"
+    logger.info(f"ShowDependencies: User requested dependencies for '{user_provided_key_arg}'")
     
-    # --- Load CURRENT Global Map ---
     current_global_map = _load_global_map_or_exit() # path_to_key_info
-   
-    config = ConfigManager()
-    project_root = get_project_root()
-    matching_infos = [info for info in current_global_map.values() if info.key_string == target_key_str]
-    if not matching_infos:
-        print(f"Error: Key string '{target_key_str}' not found in the project.")
-        return 1
+    config = ConfigManager(); project_root = get_project_root()
+
+    parts = user_provided_key_arg.split('#')
+    base_key_to_show = parts[0]
+    user_instance_num_to_show: Optional[int] = None
+    if len(parts) > 1:
+        try: user_instance_num_to_show = int(parts[1])
+        except ValueError: 
+            print(f"Error: Invalid instance number in key '{user_provided_key_arg}'. Use format KEY#num."); return 1
     
-    target_info: KeyInfo
-    if len(matching_infos) > 1:
-        print(f"Warning: Key string '{target_key_str}' is ambiguous and matches multiple paths:")
-        for i, info in enumerate(matching_infos): print(f"  [{i+1}] {info.norm_path}")
-        target_info = matching_infos[0] 
-        print(f"Using the first match: {target_info.norm_path}")
-    else:
-        target_info = matching_infos[0]
-    target_norm_path = target_info.norm_path
-    print(f"\n--- Dependencies for Key: {target_key_str} (Path: {target_norm_path}) ---")
-
-    # --- Build Path Migration Map ---
-    logger.debug("Building path migration map for show-dependencies...")
-    old_global_map = load_old_global_key_map() # Load old map (can be None)
-    path_migration_info: PathMigrationInfo
-    try:
-        # Call the builder function from tracker_io
-        path_migration_info = _build_path_migration_map(old_global_map, current_global_map)
-    except ValueError as ve:
-         logger.error(f"Failed to build migration map for show-dependencies: {ve}. Results may be inaccurate.")
-         # Create a dummy "current state only" migration map as a fallback
-         path_migration_info = {info.norm_path: (info.key_string, info.key_string) for info in current_global_map.values()}
-    except Exception as e:
-         logger.error(f"Unexpected error building migration map for show-dependencies: {e}. Results may be inaccurate.", exc_info=True)
-         path_migration_info = {info.norm_path: (info.key_string, info.key_string) for info in current_global_map.values()}
-
-
-    # --- Use Utility Functions ---
-    all_tracker_paths = find_all_tracker_paths(config, project_root)
-    if not all_tracker_paths: print("Warning: No tracker files found.")
-    
-    # Pass the generated path_migration_info to aggregate_all_dependencies
-    aggregated_links_with_origins = aggregate_all_dependencies(
-        all_tracker_paths, 
-        path_migration_info # MODIFIED: Pass the migration map
+    target_ki_to_show = get_globally_resolved_key_info_for_cli(
+        base_key_to_show, user_instance_num_to_show, current_global_map, "display"
     )
+    if not target_ki_to_show:
+        return 1 # Error already printed by helper if ambiguous or not found
 
-    # --- Process Aggregated Results for Display ---
-    all_dependencies_by_type = defaultdict(set) # Store sets of (dep_key_string, dep_path_string) tuples
-    origin_tracker_map_display = defaultdict(lambda: defaultdict(set)) # For p/s/S origins
+    target_key_gi_str_to_show = get_key_global_instance_string(target_ki_to_show, current_global_map)
+    if not target_key_gi_str_to_show: # Should not happen if target_ki_to_show is valid
+        print(f"Error: Could not determine global instance string for resolved KeyInfo {target_ki_to_show}."); return 1
 
-    logger.debug(f"Filtering aggregated links for target key display: {target_key_str}")
-    for (source, target), (dep_char, origins) in aggregated_links_with_origins.items():
-        dep_key_str = None
-        display_char = dep_char # Character used to categorize for display
-        if source == target_key_str:
-            dep_key_str = target # Target is the dependency shown
-        elif target == target_key_str:
-            dep_key_str = source # Source is the dependency shown
-            # Adjust display category based on relationship direction relative to target
-            if dep_char == '>': display_char = '<' # Target depends on Source (show Source in Depends On)
-            elif dep_char == '<': display_char = '>' # Source depends on Target (show Source in Depended On By)
-            # 'x', 'd', 's', 'S' remain the same category regardless of direction
-            else: display_char = dep_char
+    print(f"\n--- Aggregated Dependencies for: {target_key_gi_str_to_show} (Path: {target_ki_to_show.norm_path}) ---")
+    
+    # Pre-calculate global counts for display formatting
+    global_key_string_counts = defaultdict(int)
+    for ki_count in current_global_map.values():
+        global_key_string_counts[ki_count.key_string] += 1
 
-        if dep_key_str:
-            # Find path for the dependency key
-            dep_info = next((info for info in current_global_map.values() if info.key_string == dep_key_str), None)
-            dep_path_str = dep_info.norm_path if dep_info else "PATH_NOT_FOUND_GLOBALLY"
-            # Add to the correct category for display
-            all_dependencies_by_type[display_char].add((dep_key_str, dep_path_str))
-            # Track origins specifically for p/s/S if needed for display
-            if display_char in ('p', 's', 'S'):
-                origin_tracker_map_display[display_char][dep_key_str].update(origins)
+    # --- Aggregation now returns KEY#GI links ---
+    # Ensure path_migration_info is built correctly for aggregate_all_dependencies
+    old_global_map_val_show = load_old_global_key_map()
+    path_migration_info_show: PathMigrationInfo = _build_path_migration_map(old_global_map_val_show, current_global_map)
+    
+    all_tracker_paths_show = find_all_tracker_paths(config, project_root) # from tracker_utils
+    
+    aggregated_links_instance_specific = aggregate_all_dependencies( 
+        all_tracker_paths_show, 
+        path_migration_info_show,
+        current_global_map 
+    )
+    
+    all_deps_by_type_disp = defaultdict(list) 
+    # --- Use a set to track (display_char, dependency_gi_str) pairs already added ---
+    added_dep_tuples_for_display_char: Dict[str, Set[str]] = defaultdict(set)
+    origin_map_disp = defaultdict(lambda: defaultdict(set))
 
-    # --- Print results ---
-    output_sections = [
-        ("Mutual ('x')", 'x'), ("Documentation ('d')", 'd'), ("Semantic (Strong) ('S')", 'S'),
-        ("Semantic (Weak) ('s')", 's'), ("Depends On ('<')", '<'), ("Depended On By ('>')", '>'),
-        ("Placeholders ('p')", 'p')
-    ]
-    for section_title, dep_char_filter in output_sections: # Renamed dep_char to avoid conflict
-        print(f"\n{section_title}:")
-        dep_set = all_dependencies_by_type.get(dep_char_filter)
-        if dep_set:
-            # Define helper for hierarchical sorting
-            def _hierarchical_sort_key_func(key_str_local: str): # Renamed key_str
-                KEY_PATTERN = r'\d+|\D+' 
-                if not key_str_local or not isinstance(key_str_local, str): return []
-                parts = re.findall(KEY_PATTERN, key_str_local)
-                try:
-                    return [(int(p) if p.isdigit() else p) for p in parts]
-                except (ValueError, TypeError): # Fallback
-                    logger.warning(f"Could not convert parts for sorting display key '{key_str_local}'")
-                    return parts
-            sorted_deps = sorted(list(dep_set), key=lambda item: _hierarchical_sort_key_func(item[0]))
-            for dep_key, dep_path in sorted_deps:
-                # Check for and add origin info for p/s/S
-                origin_info = ""
-                if dep_char_filter in ('p', 's', 'S'):
-                    origins = origin_tracker_map_display.get(dep_char_filter, {}).get(dep_key, set())
-                    if origins:
-                        # Format origin filenames nicely
-                        origin_filenames = sorted([os.path.basename(p) for p in origins])
-                        origin_info = f" (In: {', '.join(origin_filenames)})"
-                # Print with optional origin info
-                print(f"  - {dep_key}: {dep_path}{origin_info}")
-        else: print("  None")
+    for (src_gi_link, tgt_gi_link), (char, origs) in aggregated_links_instance_specific.items():
+        display_char = char
+        dependency_gi_str: Optional[str] = None
+        
+        if src_gi_link == target_key_gi_str_to_show: 
+            dependency_gi_str = tgt_gi_link
+        elif tgt_gi_link == target_key_gi_str_to_show: 
+            dependency_gi_str = src_gi_link
+            display_char = {'<':'>', '>':'<','x':'x','d':'d','s':'s','S':'S','p':'p','n':'n'}.get(char, char) 
+        
+        if dependency_gi_str:
+            # Check if this (display_char, dependency_gi_str) has already been processed and added
+            if dependency_gi_str in added_dep_tuples_for_display_char[display_char]:
+                if display_char in ('p','s','S'): 
+                     origin_map_disp[(display_char, dependency_gi_str)].update(origs)
+                continue # Already added this dependency for this display_char type
+
+            dep_ki = resolve_key_global_instance_to_ki(dependency_gi_str, current_global_map)
+            dep_p_str = dep_ki.norm_path if dep_ki else "PATH_UNKNOWN_FOR_GI_STR"
+            
+            # Prepare display string for the dependency, adding #GI if its base key is duplicated globally
+            dep_base_key_str = dependency_gi_str.split('#')[0]
+            dep_display_name = dependency_gi_str 
+            if global_key_string_counts.get(dep_base_key_str, 0) <= 1: 
+                dep_display_name = dep_base_key_str 
+
+            all_deps_by_type_disp[display_char].append((dep_display_name, dep_p_str, dependency_gi_str))
+            added_dep_tuples_for_display_char[display_char].add(dependency_gi_str) 
+            
+            if display_char in ('p','s','S'): 
+                origin_map_disp[(display_char, dependency_gi_str)].update(origs)
+
+    output_sections_disp = [("Mutual ('x')",'x'),("Doc ('d')",'d'),("Semantic ('S')",'S'),
+                            ("Semantic ('s')",'s'),("Depends On ('<')",'<'),
+                            ("Depended On By ('>')",'>'),("Placeholder ('p')",'p')]
+    
+    for title, char_filter in output_sections_disp:
+        print(f"\n{title}:")
+        # Sort dependencies: first by base key string (hierarchically), then by global instance num
+        dep_list_for_char = sorted(
+            all_deps_by_type_disp.get(char_filter, []), 
+            key=lambda item: (
+                sort_key_strings_hierarchically([item[0].split('#')[0]])[0], 
+                int(item[0].split('#')[1]) if '#' in item[0] else 0 
+            )
+        )
+        
+        if dep_list_for_char:
+            for disp_name, dp, full_gi_str_dep in dep_list_for_char:
+                orig_str = ""
+                if char_filter in ('p','s','S'): 
+                    origins_val = origin_map_disp.get((char_filter, full_gi_str_dep), set())
+                    if origins_val: 
+                        orig_str = f" (In: {', '.join(sorted([os.path.basename(p_orig) for p_orig in origins_val]))})"
+                print(f"  - {disp_name}: {dp}{orig_str}")
+        else: 
+            print("  None")
+            
     print("\n------------------------------------------")
     return 0
 
@@ -510,55 +635,71 @@ def handle_show_keys(args: argparse.Namespace) -> int:
     logger.info(f"Attempting to show keys and check status (p, s, S) from tracker: {tracker_path}")
 
     if not os.path.exists(tracker_path):
-        print(f"Error: Tracker file not found: {tracker_path}", file=sys.stderr)
-        logger.error(f"Tracker file not found: {tracker_path}")
-        return 1
+        print(f"Error: Tracker file not found: {tracker_path}", file=sys.stderr); return 1
+
+    global_map = load_global_key_map() 
+    if not global_map:
+        logger.warning("ShowKeys: Could not load global key map. Global instance numbers will not be shown for duplicates.")
+        # Fallback: create an empty map so `get_key_global_instance_string` doesn't fail if called with it
+        global_map_for_instance_check = {}
+    else:
+        global_map_for_instance_check = global_map
+
+    # Pre-calculate global counts for each base key string to identify duplicates
+    global_key_string_counts = defaultdict(int)
+    if global_map: 
+        for ki in global_map.values():
+            global_key_string_counts[ki.key_string] += 1
+
     try:
-        tracker_data = read_tracker_file(tracker_path) 
-        if not tracker_data:
-            print(f"Error: Could not read or parse tracker file: {tracker_path}", file=sys.stderr)
-            return 1
+        with open(tracker_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        key_def_pairs_from_file = read_key_definitions_from_lines(lines) 
+        _grid_headers, grid_rows_data_list = read_grid_from_lines(lines) 
 
-        keys_map = tracker_data.get("keys")
-        grid_map = tracker_data.get("grid")
+        if not key_def_pairs_from_file:
+            print(f"No key definitions found in tracker: {tracker_path}"); return 0 
 
-        if not keys_map:
-            print(f"Error: No keys found in tracker file: {tracker_path}", file=sys.stderr)
-            logger.error(f"No key definitions found in {tracker_path}")
-            # Allow proceeding if grid is missing, but warn
-            if not grid_map:
-                logger.warning(f"Grid data also missing in {tracker_path}")
-            return 1 # Considered an error state if keys are missing
-
-        # Sort keys hierarchically for consistent output
-        sorted_keys = sort_key_strings_hierarchically(list(keys_map.keys()))
-        print(f"--- Keys Defined in {os.path.basename(tracker_path)} ---") # Header for clarity
-
-        for key_string in sorted_keys:
-            file_path = keys_map.get(key_string, "PATH_UNKNOWN")
-            check_indicator = "" # Renamed for clarity
-            # Check the grid for 'p', 's', or 'S' *only if* the grid exists
-            if grid_map:
-                compressed_row = grid_map.get(key_string, "")
-                if compressed_row: # Check if the row string exists and is not empty
-                    found_chars = []
-                    # Check for each character efficiently using 'in'. This is safe
-                    # as 'p', 's', 'S' won't appear in RLE counts (which are digits).
-                    if 'p' in compressed_row: found_chars.append('p')
-                    if 's' in compressed_row: found_chars.append('s')
-                    if 'S' in compressed_row: found_chars.append('S')
+        print(f"--- Keys Defined in {os.path.basename(tracker_path)} (Order as in File) ---")
+        
+        for idx, (key_str_in_file, path_str_in_file) in enumerate(key_def_pairs_from_file):
+            status_indicator = ""
+            # Check for p, s, S in the grid row for this item
+            if idx < len(grid_rows_data_list):
+                _row_label_from_grid, compressed_row = grid_rows_data_list[idx]
+                if compressed_row:
+                    # Check for 'p', 's', 'S' in the *decompressed* row for accuracy
+                    decomp_row_for_check = decompress(compressed_row)
+                    found_chars = {char for char in decomp_row_for_check if char in ('p', 's', 'S')}
                     if found_chars:
-                        sorted_chars = sorted(found_chars)
-                        chars_str = ", ".join(sorted_chars)
-                        check_indicator = f" (checks needed: {chars_str})" # Updated indicator format
-                else:
-                    # Indicate if a key exists but has no corresponding grid row yet
-                    check_indicator = " (grid row missing)"
-                    logger.warning(f"Key '{key_string}' found in definitions but missing from grid in {tracker_path}")
-            else: # Grid is missing entirely
-                check_indicator = " (grid missing)"
-            # Print the key, path, and the indicator (if any checks are needed or row is missing)
-            print(f"{key_string}: {file_path}{check_indicator}")
+                        status_indicator += f" (Checks needed: {', '.join(sorted(list(found_chars)))})"
+            else: 
+                status_indicator += " (Grid row data missing)"
+
+            # Determine if this key_str_in_file is globally duplicated and add #GI
+            global_instance_suffix = ""
+            # key_str_in_file could be "KEY" or "KEY#GI". We need its base key for global_key_string_counts.
+            base_key_from_label = key_str_in_file.split('#')[0]
+            if global_map and global_key_string_counts.get(base_key_from_label, 0) > 1:
+                key_info_for_this_entry = global_map.get(path_str_in_file)
+                if key_info_for_this_entry: # Check if path is in global map
+                    # Get the canonical KEY#GI for this path from the global map
+                    gi_str_canonical = get_key_global_instance_string(key_info_for_this_entry, global_map_for_instance_check)
+                    if gi_str_canonical:
+                        global_instance_suffix = f" (Global: {gi_str_canonical})"
+                        # If the label in the file doesn't match the canonical GI, note it.
+                        if key_str_in_file != gi_str_canonical and key_str_in_file == base_key_from_label: # Label was base, but has GI
+                             global_instance_suffix += f" - Label in file is base key"
+                        elif key_str_in_file != gi_str_canonical: # Label was specific GI, but different from canonical
+                             global_instance_suffix += f" - Label in file '{key_str_in_file}' differs from canonical"
+                    else: # Should not happen if key_info_for_this_entry is valid
+                        global_instance_suffix = f" (Global: {base_key_from_label}#? - Error getting GI)"
+                else: 
+                    global_instance_suffix = f" (Global: {base_key_from_label}#? - Path not in current global map)"
+            
+            print(f"{key_str_in_file}: {path_str_in_file}{global_instance_suffix}{status_indicator}")
+            
         print("--- End of Key Definitions ---")
         try:
             with open(tracker_path, 'r', encoding='utf-8') as f_check:
@@ -581,37 +722,33 @@ def handle_show_keys(args: argparse.Namespace) -> int:
 
 def handle_visualize_dependencies(args: argparse.Namespace) -> int:
     """Handles the visualize-dependencies command by calling the core generation function."""
-    # 1. Get arguments
-    focus_keys_list_cli = args.key if args.key is not None else [] # args.key is now a list or None
+    focus_keys_list_cli = args.key if args.key is not None else [] 
     output_format_cli = args.format.lower()
     output_path_arg_cli = args.output
 
     logger.info(f"CLI: visualize-dependencies called. Focus Keys: {focus_keys_list_cli or 'Project Overview'}")
 
-    # 2. Basic validation
     if output_format_cli != "mermaid":
         print(f"Error: Only 'mermaid' format supported at this time.")
         return 1
 
-    # 3. Load necessary data
     try:
-        current_global_map_cli = _load_global_map_or_exit() # Renamed for clarity
+        current_global_map_cli = _load_global_map_or_exit() 
         config_cli = ConfigManager()
         project_root_cli = get_project_root()
-        # Use find_all_tracker_paths from tracker_io module
+        # Use find_all_tracker_paths from tracker_utils (was tracker_io before)
         all_tracker_paths_cli = find_all_tracker_paths(config_cli, project_root_cli)
         if not all_tracker_paths_cli:
             print("Warning: No tracker files found. Diagram may be empty.")
 
-        # --- Build Path Migration Map FOR THIS COMMAND ---
         logger.debug("Building path migration map for visualize-dependencies command...")
-        old_global_map_cli = load_old_global_key_map() # Load old map
+        old_global_map_cli = load_old_global_key_map() 
         path_migration_info_cli: PathMigrationInfo
         try:
+            # Use _build_path_migration_map from tracker_io
             path_migration_info_cli = _build_path_migration_map(old_global_map_cli, current_global_map_cli)
         except ValueError as ve:
             logger.error(f"Failed to build migration map for visualize-dependencies: {ve}. Visualization may be based on current state only or fail.")
-            # Fallback to a "current state only" dummy migration map
             path_migration_info_cli = {info.norm_path: (info.key_string, info.key_string) for info in current_global_map_cli.values()}
         except Exception as e:
             logger.error(f"Unexpected error building migration map for visualize-dependencies: {e}. Visualization may be inaccurate.", exc_info=True)
@@ -623,37 +760,44 @@ def handle_visualize_dependencies(args: argparse.Namespace) -> int:
         return 1
 
 
-    # 4. Call the core generation function from the new module
     mermaid_string_generated = generate_mermaid_diagram(
-        focus_keys_list=focus_keys_list_cli,
-        global_path_to_key_info_map=current_global_map_cli, # Still pass current map for node info
-        path_migration_info=path_migration_info_cli,       # Pass the migration map
+        focus_keys_list=focus_keys_list_cli, # generate_mermaid_diagram needs to handle KEY or KEY#GI
+        global_path_to_key_info_map=current_global_map_cli, 
+        path_migration_info=path_migration_info_cli,       
         all_tracker_paths_list=list(all_tracker_paths_cli),
         config_manager_instance=config_cli
     )
 
-    # 5. Handle the result (Mermaid string or None)
     if mermaid_string_generated is None:
         print("Error: Mermaid diagram generation failed internally. Check logs.", file=sys.stderr)
         return 1
-    elif "Error:" in mermaid_string_generated[:20]: # Check if the string itself contains an error message
+    elif "Error:" in mermaid_string_generated[:20]: 
          print(mermaid_string_generated, file=sys.stderr)
          return 1
     elif "// No relevant data" in mermaid_string_generated:
          print("Info: No relevant data found to visualize based on focus keys and filters.")
-         # Still save the basic mermaid file for consistency? Or just return 0? Let's save it.
     else:
         logger.info("Mermaid code generated successfully.")
 
 
-    # 6. Determine output path
-    output_path_cli = output_path_arg_cli # User-specified output path
+    output_path_cli = output_path_arg_cli 
     if not output_path_cli:
-        # Construct default path
         if focus_keys_list_cli:
-            # Create a filename-safe string from potentially multiple keys
-            safe_keys_str = "_".join(sorted(focus_keys_list_cli)).replace("/", "_").replace("\\", "_")
-            # Limit filename length
+            # For focus keys, ensure they are resolved to KEY#GI for unique filenames if necessary
+            resolved_focus_key_gis_for_filename: List[str] = []
+            for fk_raw in focus_keys_list_cli:
+                fk_parts = fk_raw.split('#')
+                fk_base = fk_parts[0]
+                fk_inst_num_user = int(fk_parts[1]) if len(fk_parts) > 1 else None
+                fk_resolved_ki = get_globally_resolved_key_info_for_cli(fk_base, fk_inst_num_user, current_global_map_cli, "filename focus")
+                if fk_resolved_ki:
+                    fk_gi_str = get_key_global_instance_string(fk_resolved_ki, current_global_map_cli)
+                    if fk_gi_str: resolved_focus_key_gis_for_filename.append(fk_gi_str)
+                else: # Fallback to raw if resolution fails for filename part
+                    resolved_focus_key_gis_for_filename.append(fk_raw.replace("#", "_hash_"))
+
+
+            safe_keys_str = "_".join(sorted(resolved_focus_key_gis_for_filename)).replace("/", "_").replace("\\", "_").replace("#", "_hash_")
             max_len = 50
             if len(safe_keys_str) > max_len:
                 safe_keys_str = safe_keys_str[:max_len] + "_etc"
@@ -661,27 +805,20 @@ def handle_visualize_dependencies(args: argparse.Namespace) -> int:
         else:
             default_filename = f"project_overview_dependencies.{output_format_cli}"
 
-        # --- Define the default directory ---
-        # Use memory_dir from config, defaulting to 'cline_docs' if not set
         memory_dir_rel = config_cli.get_path('memory_dir', 'cline_docs')
         default_output_dir_rel = os.path.join(memory_dir_rel, "dependency_diagrams")
-        # --- End Define Default Dir ---
-
-        # Combine relative default dir with project root and default filename
         output_path_cli = normalize_path(os.path.join(project_root_cli, default_output_dir_rel, default_filename))
         logger.info(f"No output path specified, using default: {output_path_cli}")
 
-    # Ensure output path is normalized (if user provided relative path, make it absolute)
     elif not os.path.isabs(output_path_cli):
          output_path_cli = normalize_path(os.path.join(project_root_cli, output_path_cli))
     else:
          output_path_cli = normalize_path(output_path_cli)
 
 
-    # 7. Write the output file
     try:
         output_dir_cli = os.path.dirname(output_path_cli)
-        if output_dir_cli: # Only create if it's not the current directory
+        if output_dir_cli: 
             os.makedirs(output_dir_cli, exist_ok=True)
 
         with open(output_path_cli, 'w', encoding='utf-8') as f_out:
@@ -689,7 +826,7 @@ def handle_visualize_dependencies(args: argparse.Namespace) -> int:
 
         logger.info(f"Successfully wrote Mermaid visualization to: {output_path_cli}")
         print(f"\nDependency visualization saved to: {output_path_cli}")
-        if "// No relevant data" not in mermaid_string_generated: # Only print view instructions if there's data
+        if "// No relevant data" not in mermaid_string_generated: 
              print("You can view this file using Mermaid Live Editor (mermaid.live) or compatible Markdown viewers.")
         return 0
     except IOError as e:
@@ -733,35 +870,35 @@ def main():
     get_char_parser.add_argument("index", type=int, help="Logical index")
     get_char_parser.set_defaults(func=handle_get_char)
 
-    set_char_parser = subparsers.add_parser("set_char", help="Set char at logical index in a tracker file")
+    set_char_parser = subparsers.add_parser("set_char", help="DEPRECATED & UNSAFE: Set char in a tracker file. Use 'add-dependency' instead.")
     set_char_parser.add_argument("tracker_file", help="Path to tracker file")
-    set_char_parser.add_argument("key", type=str, help="Row key")
-    set_char_parser.add_argument("index", type=int, help="Logical index")
+    set_char_parser.add_argument("key", type=str, help="Row key label from tracker definitions (e.g., '1A1' or '1A1#2')")
+    set_char_parser.add_argument("index", type=int, help="Logical index in row (0-based, refers to Nth definition in tracker's original order)")
     set_char_parser.add_argument("char", type=str, help="New character")
     set_char_parser.set_defaults(func=handle_set_char)
 
-    add_dep_parser = subparsers.add_parser("add-dependency", help="Add dependency between keys")
+    add_dep_parser = subparsers.add_parser("add-dependency", help="Add dependency between keys (supports #instance for duplicates)")
     add_dep_parser.add_argument("--tracker", required=True, help="Path to tracker file")
-    add_dep_parser.add_argument("--source-key", required=True, help="Source key")
-    add_dep_parser.add_argument("--target-key", required=True, nargs='+', help="One or more target keys (space-separated)")
+    add_dep_parser.add_argument("--source-key", required=True, help="Source key string (e.g., '1A1' or '1A1#2')")
+    add_dep_parser.add_argument("--target-key", required=True, nargs='+', help="One or more target key strings (e.g., '2Ba2' or '2Ba2#1')")
     add_dep_parser.add_argument("--dep-type", default=">", help="Dependency type (e.g., '>', '<', 'x')")
     add_dep_parser.set_defaults(func=handle_add_dependency)
 
     # --- Tracker File Management ---
-    remove_key_parser = subparsers.add_parser("remove-key", help="Remove a key and its row/column from a specific tracker")
+    remove_key_parser = subparsers.add_parser("remove-key", help="Remove an item by its key label from a specific tracker (resolves to path)")
     remove_key_parser.add_argument("tracker_file", help="Path to the tracker file (.md)")
-    remove_key_parser.add_argument("key", type=str, help="The key string to remove from this tracker")
+    remove_key_parser.add_argument("key", type=str, help="The key label (e.g., '1A1' or '1A1#2') from the tracker file to remove. If ambiguous in tracker, command will error.")
     remove_key_parser.set_defaults(func=handle_remove_key)
 
     merge_parser = subparsers.add_parser("merge-trackers", help="Merge two tracker files")
     merge_parser.add_argument("primary_tracker_path", help="Primary tracker")
     merge_parser.add_argument("secondary_tracker_path", help="Secondary tracker")
-    merge_parser.add_argument("--output", "-o", help="Output path (defaults to primary)")
+    merge_parser.add_argument("--output", "-o", help="Output path (defaults to overwriting primary)")
     merge_parser.set_defaults(func=handle_merge_trackers)
 
     export_parser = subparsers.add_parser("export-tracker", help="Export tracker data")
     export_parser.add_argument("tracker_file", help="Path to tracker file")
-    export_parser.add_argument("--format", choices=["json", "csv", "dot"], default="json", help="Export format")
+    export_parser.add_argument("--format", choices=["json", "csv", "dot", "md"], default="json", help="Export format")
     export_parser.add_argument("--output", "-o", help="Output file path")
     export_parser.set_defaults(func=handle_export_tracker)
 
@@ -778,7 +915,7 @@ def main():
     update_config_parser.set_defaults(func=handle_update_config)
 
     show_deps_parser = subparsers.add_parser("show-dependencies", help="Show aggregated dependencies for a key")
-    show_deps_parser.add_argument("--key", required=True, help="Key string to show dependencies for")
+    show_deps_parser.add_argument("--key", required=True, help="Key string to show dependencies for (e.g., '1A1' or '1A1#2')")
     show_deps_parser.set_defaults(func=handle_show_dependencies)
 
     # --- Show Keys Command ---
@@ -789,9 +926,9 @@ def main():
     visualize_parser = subparsers.add_parser("visualize-dependencies", help="Generate a visualization of dependencies")
     visualize_parser.add_argument(
         "--key",
-        nargs='*', # Changed to accept zero or more keys
-        default=None, # Default is None if not provided
-        help="Optional: One or more key strings to focus the visualization on. If omitted, shows overview."
+        nargs='*', 
+        default=None, 
+        help="Optional: One or more key strings to focus the visualization on (e.g., '1A1', '2B#3'). If omitted, shows overview."
     )
     visualize_parser.add_argument(
         "--format",
@@ -810,18 +947,34 @@ def main():
     # --- Setup Logging ---
     log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     root_logger = logging.getLogger(); root_logger.setLevel(logging.DEBUG)
-    log_file_path = 'debug.txt'; suggestions_log_path = 'suggestions.log'
-    try: # File Handler
-        file_handler = logging.FileHandler(log_file_path, mode='w'); file_handler.setLevel(logging.DEBUG); file_handler.setFormatter(log_formatter); root_logger.addHandler(file_handler)
-    except Exception as e: print(f"Error setting up file logger {log_file_path}: {e}", file=sys.stderr)
-    try: # Suggestions Handler
-        suggestion_handler = logging.FileHandler(suggestions_log_path, mode='w'); suggestion_handler.setLevel(logging.DEBUG); suggestion_handler.setFormatter(log_formatter)
+    try:
+        log_file_path = normalize_path(os.path.join(get_project_root(), 'debug.txt')) 
+        file_handler = logging.FileHandler(log_file_path, mode='w')
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(log_formatter)
+        root_logger.addHandler(file_handler)
+    except Exception as e_fh: print(f"Error setting up file logger {log_file_path}: {e_fh}", file=sys.stderr)
+
+    # File Handler specifically for suggestion-related logs (if desired)
+    try:
+        suggestions_log_path = normalize_path(os.path.join(get_project_root(), 'suggestions.log'))
+        suggestion_handler = logging.FileHandler(suggestions_log_path, mode='w')
+        suggestion_handler.setLevel(logging.DEBUG) 
+        suggestion_handler.setFormatter(log_formatter)
         class SuggestionLogFilter(logging.Filter):
-            def filter(self, record): return record.name.startswith('cline_utils.dependency_system.analysis') # Broaden slightly
-        suggestion_handler.addFilter(SuggestionLogFilter()); root_logger.addHandler(suggestion_handler)
-    except Exception as e: print(f"Error setting up suggestions logger {suggestions_log_path}: {e}", file=sys.stderr)
-    # Console Handler
-    console_handler = logging.StreamHandler(sys.stdout); console_handler.setLevel(logging.INFO); console_handler.setFormatter(log_formatter); root_logger.addHandler(console_handler)
+            def filter(self, record):
+                return record.name.startswith('cline_utils.dependency_system.analysis.dependency_suggester') or \
+                       record.name.startswith('cline_utils.dependency_system.analysis.project_analyzer') and "suggestion" in record.getMessage().lower() or \
+                       record.name.startswith('cline_utils.dependency_system.io.tracker_io') and "suggestion" in record.getMessage().lower()
+        suggestion_handler.addFilter(SuggestionLogFilter())
+        root_logger.addHandler(suggestion_handler)
+    except Exception as e_sh: print(f"Error setting up suggestions logger {suggestions_log_path}: {e_sh}", file=sys.stderr)
+    
+    # Console Handler for user-facing messages (INFO and above)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO) 
+    console_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s')) 
+    root_logger.addHandler(console_handler)
 
     # Execute command
     if hasattr(args, 'func'):
@@ -832,4 +985,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main() # Call main function if script is executed
+    main() 

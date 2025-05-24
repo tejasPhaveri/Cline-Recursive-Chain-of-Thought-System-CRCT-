@@ -13,7 +13,8 @@ from cline_utils.dependency_system.utils.path_utils import get_project_root, nor
 from cline_utils.dependency_system.core.key_manager import load_global_key_map, KeyInfo
 from cline_utils.dependency_system.utils.tracker_utils import (
     find_all_tracker_paths,
-    aggregate_all_dependencies
+    aggregate_all_dependencies,
+    get_key_global_instance_string
 )
 
 logger = logging.getLogger(__name__)
@@ -289,23 +290,43 @@ def _calculate_initial_coverage_and_gaps(
     # Call aggregate_all_dependencies with path_migration_info
     # The keys in aggregated_links will be CURRENT keys.
     try:
-        aggregated_links = aggregate_all_dependencies(all_tracker_paths, path_migration_info)
+        aggregated_links = aggregate_all_dependencies(
+            all_tracker_paths,
+            path_migration_info,
+            global_key_map
+        )
     except ValueError as ve: # Catch potential errors from aggregation
         logger.error(f"Coverage calculation failed: Error during dependency aggregation: {ve}")
         return 0.0, {"Error": [f"Aggregation failed: {ve}"]} # Return error indication
     except Exception as e:
         logger.error(f"Coverage calculation failed: Unexpected error during dependency aggregation: {e}", exc_info=True)
         return 0.0, {"Error": [f"Unexpected aggregation error: {e}"]}
+   
+    # We need a way to get KeyInfo from KEY#GI. tracker_utils.resolve_key_global_instance_to_ki does this.
+    from cline_utils.dependency_system.utils.tracker_utils import resolve_key_global_instance_to_ki
 
-    for code_file_info in code_files: # code_file_info.key_string is CURRENT key
+    doc_file_global_instance_strs = {
+        gis for df_ki in doc_files 
+        if (gis := get_key_global_instance_string(df_ki, global_key_map)) is not None # from tracker_utils
+    }
+
+
+    for code_file_info in code_files:
+        code_file_gi_str = get_key_global_instance_string(code_file_info, global_key_map) # from tracker_utils
+        if not code_file_gi_str:
+            logger.warning(f"Coverage: Could not get GI string for code file {code_file_info.norm_path}. Skipping.")
+            # Add to gaps directly if GI string cannot be formed
+            # ... (add to coverage_gaps logic) ...
+            continue
+
         has_doc_dep = False
-        for (source_key, target_key), (dep_char, _) in aggregated_links.items():
-            # source_key and target_key are CURRENT keys from aggregation
-            if source_key == code_file_info.key_string and \
-               target_key in doc_file_keys and \
-               dep_char in POSITIVE_DOC_DEPENDENCY_CHARS:
-                has_doc_dep = True
-                break
+        for (source_key_gi, target_key_gi), (dep_char, _) in aggregated_links.items():
+            if source_key_gi == code_file_gi_str: # Code file is the source
+                # Check if target_key_gi corresponds to a known doc file's global instance string
+                if target_key_gi in doc_file_global_instance_strs and \
+                    dep_char in POSITIVE_DOC_DEPENDENCY_CHARS:
+                    has_doc_dep = True
+                    break
         if has_doc_dep:
             code_files_with_doc_deps_count += 1
         else:

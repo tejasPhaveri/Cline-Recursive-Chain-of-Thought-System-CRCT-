@@ -15,64 +15,257 @@ from cline_utils.dependency_system.core.dependency_grid import PLACEHOLDER_CHAR,
 
 logger = logging.getLogger(__name__)
 
-# Type alias from tracker_io
-PathMigrationInfo = Dict[str, Tuple[Optional[str], Optional[str]]] # path -> (old_key, new_key)
+PathMigrationInfo = Dict[str, Tuple[Optional[str], Optional[str]]] 
 
-
-@cached("tracker_data",
-        key_func=lambda tracker_path:
-        f"tracker_data:{normalize_path(tracker_path)}:{(os.path.getmtime(tracker_path) if os.path.exists(tracker_path) else 0)}")
-def read_tracker_file(tracker_path: str) -> Dict[str, Any]:
+# --- GLOBAL INSTANCE RESOLUTION HELPERS (Centralized Here) ---
+def resolve_key_global_instance_to_ki( 
+    key_hash_instance_str: str, 
+    current_global_path_to_key_info: Dict[str, KeyInfo] 
+) -> Optional[KeyInfo]:
     """
-    Read a tracker file and parse its contents. Caches based on path and mtime.
+    Resolves a KEY#global_instance string to a specific KeyInfo object
+    from the provided current_global_path_to_key_info.
+    """
+    parts = key_hash_instance_str.split('#')
+    base_key = parts[0]
+    instance_num = 1 
+    if len(parts) > 1:
+        try: 
+            instance_num = int(parts[1])
+            if instance_num <= 0: 
+                logger.warning(f"TrackerUtils.ResolveKI: Invalid instance num {instance_num} in '{key_hash_instance_str}'.")
+                return None
+        except ValueError: 
+            logger.warning(f"TrackerUtils.ResolveKI: Invalid instance format in '{key_hash_instance_str}'.")
+            return None
+    
+    matches = [ki for ki in current_global_path_to_key_info.values() if ki.key_string == base_key]
+    if not matches:
+        logger.warning(f"TrackerUtils.ResolveKI: Base key '{base_key}' (from '{key_hash_instance_str}') has no KeyInfo entries in global map.")
+        return None
+    
+    matches.sort(key=lambda k_sort: k_sort.norm_path) 
+            
+    if 0 < instance_num <= len(matches):
+        return matches[instance_num - 1]
+    
+    logger.warning(f"TrackerUtils.ResolveKI: Global instance {key_hash_instance_str} out of bounds (max {len(matches)} for key '{base_key}').")
+    return None
+
+# (This was moved from project_analyzer.py and made more generic)
+# It's placed here because tracker_io will also need it.
+
+# Module-level cache for get_key_global_instance_string to persist across calls within a run
+_module_level_base_key_to_sorted_KIs_cache: Dict[str, List[KeyInfo]] = defaultdict(list)
+
+def clear_global_instance_resolution_cache(): # Helper to clear if needed, e.g. for testing or between runs
+    """Clears the module-level cache for GI string resolution."""
+    _module_level_base_key_to_sorted_KIs_cache.clear()
+    logger.debug("TrackerUtils: Cleared module-level GI resolution cache.")
+
+def get_key_global_instance_string(
+    ki_obj_to_format: KeyInfo, 
+    current_global_path_to_key_info: Dict[str, KeyInfo],
+    # Optional cache can be passed for specific contexts, otherwise uses module-level
+    base_key_to_sorted_KIs_cache: Optional[Dict[str, List[KeyInfo]]] = None 
+) -> Optional[str]:
+    """
+    Determines the KEY#global_instance string for a given KeyInfo object
+    based on its order within all KeyInfos sharing the same base key string
+    in the provided current_global_path_to_key_info.
+    Uses a provided cache or a module-level cache.
+    """
+    if not ki_obj_to_format:
+        logger.warning("TrackerUtils.GetGlobalInstanceString: Received None for ki_obj_to_format.")
+        return None
+
+    # Use the provided cache if available, otherwise the module-level one
+    cache_to_use = base_key_to_sorted_KIs_cache if base_key_to_sorted_KIs_cache is not None \
+                   else _module_level_base_key_to_sorted_KIs_cache
+
+    base_key = ki_obj_to_format.key_string
+    if base_key not in cache_to_use: # Populate cache if miss
+        matches = [ki for ki in current_global_path_to_key_info.values() if ki.key_string == base_key]
+        if not matches: 
+            logger.error(f"TrackerUtils.GetGlobalInstanceString: Base key '{base_key}' for KI '{ki_obj_to_format.norm_path}' not found in global map. Cannot generate GI string.")
+            return None # Cannot proceed if base_key has no matches
+        matches.sort(key=lambda k_sort: k_sort.norm_path)
+        cache_to_use[base_key] = matches
+    
+    sorted_matches = cache_to_use.get(base_key) # Use .get() for safety, though it should be populated
+    if not sorted_matches: 
+        # This case should ideally not be hit if the above logic is correct
+        logger.error(f"TrackerUtils.GetGlobalInstanceString: Base key '{base_key}' for KI '{ki_obj_to_format.norm_path}' not found in cache after attempting population.")
+        return None
+        
+    try:
+        # Find the index of the specific KeyInfo object by its unique normalized path
+        instance_num = -1
+        for i, match_ki in enumerate(sorted_matches):
+            if match_ki.norm_path == ki_obj_to_format.norm_path:
+                instance_num = i + 1
+                break
+        
+        if instance_num == -1: # Should not happen if ki_obj_to_format is valid and from current_global_path_to_key_info
+            logger.error(f"TrackerUtils.GetGlobalInstanceString: Could not find KI {ki_obj_to_format.norm_path} (Key: {base_key}) in its own sorted list of global matches. List: {[m.norm_path for m in sorted_matches]}")
+            return None
+        return f"{base_key}#{instance_num}"
+    except Exception as e: # Catch any unexpected errors during list processing
+        logger.error(f"TrackerUtils.GetGlobalInstanceString: Unexpected error finding instance for KI {ki_obj_to_format.norm_path} (Key: {base_key}) in its own sorted list of global matches. Matches found: {[m.norm_path for m in matches]}", exc_info=True)
+        return None
+
+def get_globally_resolved_key_info_for_cli( 
+    base_key_str: str, 
+    user_instance_num: Optional[int], 
+    global_map: Dict[str, KeyInfo], 
+    key_role: str 
+) -> Optional[KeyInfo]:
+    matching_global_infos = [info for info in global_map.values() if info.key_string == base_key_str]
+    if not matching_global_infos:
+        print(f"Error: Base {key_role} key '{base_key_str}' not found in global key map.")
+        return None
+    matching_global_infos.sort(key=lambda ki: ki.norm_path) 
+    if user_instance_num is not None: 
+        if 0 < user_instance_num <= len(matching_global_infos):
+            return matching_global_infos[user_instance_num - 1]
+        else:
+            print(f"Error: {key_role.capitalize()} key '{base_key_str}#{user_instance_num}' specifies an invalid global instance number. Max is {len(matching_global_infos)}.")
+    if len(matching_global_infos) > 1:
+        print(f"Error: {key_role.capitalize()} key '{base_key_str}' is globally ambiguous. Please specify which instance you mean using '#<num>':")
+        for i, ki in enumerate(matching_global_infos):
+            print(f"  [{i+1}] {ki.key_string} (Path: {ki.norm_path})  (Use as '{base_key_str}#{i+1}')")
+        return None
+    return matching_global_infos[0]
+# --- END OF GLOBAL INSTANCE RESOLUTION HELPERS ---
+
+# --- PARSING HELPERS (Updated for KEY#GI) ---
+KEY_GI_PATTERN_PART = r"[a-zA-Z0-9]+(?:#[0-9]+)?" # Capture KEY or KEY#num
+
+def read_key_definitions_from_lines(lines: List[str]) -> List[Tuple[str, str]]:
+    """Reads key definitions from lines. Returns a list of (key_string, path_string) tuples."""
+    key_path_pairs: List[Tuple[str, str]] = []
+    in_section = False
+    key_def_start_pattern = re.compile(r'^---KEY_DEFINITIONS_START---$', re.IGNORECASE)
+    key_def_end_pattern = re.compile(r'^---KEY_DEFINITIONS_END---$', re.IGNORECASE)
+    # Regex now includes optional #instance part
+    definition_pattern = re.compile(fr"^({KEY_GI_PATTERN_PART})\s*:\s*(.*)$")
+
+    for line in lines:
+        if key_def_end_pattern.match(line.strip()): break
+        if in_section:
+            line_content = line.strip()
+            if not line_content or line_content.lower().startswith("key definitions:"): continue
+            match = definition_pattern.match(line_content) # Use updated pattern
+            if match:
+                k_gi, v_path = match.groups() # k_gi is now the full KEY#GI or KEY
+                # validate_key already handles KEY#GI format
+                if validate_key(k_gi): 
+                    key_path_pairs.append((k_gi, normalize_path(v_path.strip())))
+                else: # Should be caught by regex, but as fallback
+                    logger.warning(f"TrackerUtils.ReadDefinitions: Skipping invalid key format '{k_gi}'.") 
+            # else: logger.debug(f"ReadDefs: Line did not match key def pattern: '{line_content}'")
+        elif key_def_start_pattern.match(line.strip()): in_section = True
+    return key_path_pairs
+
+def read_grid_from_lines(lines: List[str]) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """
+    Reads grid from lines. Returns: (grid_column_header_key_strings, list_of_grid_rows)
+    where list_of_grid_rows is List[(row_key_string_label, compressed_row_data_string)]
+    """
+    grid_column_header_keys_gi: List[str] = [] # Will store KEY or KEY#GI
+    grid_rows_data_gi: List[Tuple[str, str]] = [] # (KEY or KEY#GI, compressed_data) 
+    in_section = False
+    grid_start_pattern = re.compile(r'^---GRID_START---$', re.IGNORECASE)
+    grid_end_pattern = re.compile(r'^---GRID_END---$', re.IGNORECASE)
+    # Regex for row labels now includes optional #instance part
+    row_label_pattern = re.compile(fr"^({KEY_GI_PATTERN_PART})\s*=\s*(.*)$")
+
+    for line in lines:
+        if grid_end_pattern.match(line.strip()): break
+        if in_section:
+            line_content = line.strip()
+            if line_content.upper().startswith("X "):
+                # Split header, keys can now be KEY or KEY#GI
+                potential_keys = line_content.split()[1:]
+                grid_column_header_keys_gi = [k for k in potential_keys if validate_key(k)]
+                if len(grid_column_header_keys_gi) != len(potential_keys):
+                    logger.warning(f"TrackerUtils.ReadGrid: Some X-header keys are invalid and were skipped.")
+                continue
+            if not line_content or line_content == "X": continue
+            
+            match = row_label_pattern.match(line_content) # Use updated pattern
+            if match:
+                k_label_gi, v_data = match.groups() # k_label_gi is KEY or KEY#GI
+                if validate_key(k_label_gi):
+                    grid_rows_data_gi.append((k_label_gi, v_data.strip()))
+                else: # Should be caught by regex
+                    logger.warning(f"TrackerUtils.ReadGrid: Skipping row with invalid key label format '{k_label_gi}'.")
+            # else: logger.debug(f"ReadGrid: Line did not match row data pattern: '{line_content}'")
+        elif grid_start_pattern.match(line.strip()): in_section = True
+    
+    # Consistency check in read_tracker_file_structured will compare with definitions count
+    return grid_column_header_keys_gi, grid_rows_data_gi
+# --- END OF PARSING HELPERS ---
+
+@cached("tracker_data_structured",
+        key_func=lambda tracker_path:
+        f"tracker_data_structured:{normalize_path(tracker_path)}:{(os.path.getmtime(tracker_path) if os.path.exists(tracker_path) else 0)}")
+def read_tracker_file_structured(tracker_path: str) -> Dict[str, Any]:
+    """
+    Read a tracker file and parse its contents into list-based structures
+    compatible with the new format (handles duplicate key strings).
     Args:
         tracker_path: Path to the tracker file
     Returns:
-        Dictionary with keys, grid, and metadata, or empty structure on failure.
+        Dictionary with "definitions_ordered": List[Tuple[str,str]], 
+                         "grid_headers_ordered": List[str],
+                         "grid_rows_ordered": List[Tuple[str,str]], (row_label, compressed_data)
+                         "last_key_edit": str, "last_grid_edit": str
+        or empty structure on failure.
     """
     tracker_path = normalize_path(tracker_path)
+    # Initialize with empty lists for the new structure
+    empty_result = {
+        "definitions_ordered": [], 
+        "grid_headers_ordered": [], 
+        "grid_rows_ordered": [], 
+        "last_key_edit": "", 
+        "last_grid_edit": ""
+    }
     if not os.path.exists(tracker_path):
-        logger.debug(f"Tracker file not found: {tracker_path}. Returning empty structure.")
-        return {"keys": {}, "grid": {}, "last_key_edit": "", "last_grid_edit": ""}
+        logger.debug(f"Tracker file not found: {tracker_path}. Returning empty structured data.")
+        return empty_result
     try:
-        with open(tracker_path, 'r', encoding='utf-8') as f: content = f.read()
-        keys = {}; grid = {}; last_key_edit = ""; last_grid_edit = ""
-        key_section_match = re.search(r'---KEY_DEFINITIONS_START---\n(.*?)\n---KEY_DEFINITIONS_END---', content, re.DOTALL | re.IGNORECASE)
-        if key_section_match:
-            key_section_content = key_section_match.group(1)
-            for line in key_section_content.splitlines():
-                line = line.strip()
-                if not line or line.lower().startswith("key definitions:"): continue
-                match = re.match(r'^([a-zA-Z0-9]+)\s*:\s*(.*)$', line)
-                if match:
-                    k, v = match.groups()
-                    if validate_key(k): keys[k] = normalize_path(v.strip())
-                    else: logger.warning(f"Skipping invalid key format in {tracker_path}: '{k}'")
-
-        grid_section_match = re.search(r'---GRID_START---\n(.*?)\n---GRID_END---', content, re.DOTALL | re.IGNORECASE)
-        if grid_section_match:
-            grid_section_content = grid_section_match.group(1)
-            lines = grid_section_content.strip().splitlines()
-            # Skip header line (X ...) if present
-            if lines and (lines[0].strip().upper().startswith("X ") or lines[0].strip() == "X"): lines = lines[1:]
-            for line in lines:
-                line = line.strip()
-                match = re.match(r'^([a-zA-Z0-9]+)\s*=\s*(.*)$', line)
-                if match:
-                    k, v = match.groups()
-                    if validate_key(k): grid[k] = v.strip()
-                    else: logger.warning(f"Grid row key '{k}' in {tracker_path} has invalid format. Skipping.")
-
-        last_key_edit_match = re.search(r'^last_KEY_edit\s*:\s*(.*)$', content, re.MULTILINE | re.IGNORECASE)
-        if last_key_edit_match: last_key_edit = last_key_edit_match.group(1).strip()
-        last_grid_edit_match = re.search(r'^last_GRID_edit\s*:\s*(.*)$', content, re.MULTILINE | re.IGNORECASE)
-        if last_grid_edit_match: last_grid_edit = last_grid_edit_match.group(1).strip()
-
-        logger.debug(f"Read tracker '{os.path.basename(tracker_path)}': {len(keys)} keys, {len(grid)} grid rows")
-        return {"keys": keys, "grid": grid, "last_key_edit": last_key_edit, "last_grid_edit": last_grid_edit}
+        with open(tracker_path, 'r', encoding='utf-8') as f: lines = f.readlines()
+        # Use the helpers now defined in this file
+        definitions = read_key_definitions_from_lines(lines) 
+        grid_headers, grid_rows = read_grid_from_lines(lines)
+        content_str = "".join(lines)
+        last_key_edit_match = re.search(r'^last_KEY_edit\s*:\s*(.*)$', content_str, re.MULTILINE | re.IGNORECASE)
+        last_key_edit = last_key_edit_match.group(1).strip() if last_key_edit_match else ""
+        last_grid_edit_match = re.search(r'^last_GRID_edit\s*:\s*(.*)$', content_str, re.MULTILINE | re.IGNORECASE)
+        last_grid_edit = last_grid_edit_match.group(1).strip() if last_grid_edit_match else ""
+        
+        # Basic consistency check based on what was read from file directly
+        if definitions and grid_headers and grid_rows and not (len(definitions) == len(grid_headers) == len(grid_rows)):
+            logger.warning(f"ReadStructured: Inconsistent counts in '{os.path.basename(tracker_path)}'. Defs: {len(definitions)}, Headers: {len(grid_headers)}, Rows: {len(grid_rows)}. Data might be misaligned.")
+        elif definitions and grid_rows and not grid_headers and len(definitions) == len(grid_rows):
+            logger.debug(f"ReadStructured: Grid headers missing but defs and rows match for '{os.path.basename(tracker_path)}'. Imputing headers from defs.")
+            grid_headers = [d[0] for d in definitions]
+        
+        logger.debug(f"Read structured tracker '{os.path.basename(tracker_path)}': "
+                     f"{len(definitions)} defs, {len(grid_headers)} grid headers, {len(grid_rows)} grid rows.")
+        
+        return {
+            "definitions_ordered": definitions,
+            "grid_headers_ordered": grid_headers,
+            "grid_rows_ordered": grid_rows,
+            "last_key_edit": last_key_edit,
+            "last_grid_edit": last_grid_edit
+        }
     except Exception as e:
-        logger.exception(f"Error reading tracker file {tracker_path}: {e}")
-        return {"keys": {}, "grid": {}, "last_key_edit": "", "last_grid_edit": ""}
+        logger.exception(f"Error reading structured tracker file {tracker_path}: {e}")
+        return empty_result
 
 def find_all_tracker_paths(config: ConfigManager, project_root: str) -> Set[str]:
     """Finds all main, doc, and mini tracker files in the project."""
@@ -112,144 +305,123 @@ def find_all_tracker_paths(config: ConfigManager, project_root: str) -> Set[str]
                 logger.debug(f"Found {len(normalized_mini_paths)} mini trackers under '{code_root_rel}'.")
             except Exception as e:
                  logger.error(f"Error during glob search for mini trackers under '{code_root_abs}': {e}")
-
     logger.info(f"Found {len(all_tracker_paths)} total tracker files.")
     return all_tracker_paths
 
-# --- Modified Aggregation Function ---
-@cached("aggregation", key_func=lambda paths, pmi: f"agg:{':'.join(sorted(list(paths)))}:{hash(tuple(sorted(pmi.items())))}", ttl=300)
+# --- MODIFIED AGGREGATION FUNCTION (Uses KEY#global_instance) ---
+@cached("aggregation_v2_gi",
+        key_func=lambda paths, pmi, cgptki: f"agg_v2_gi:{':'.join(sorted(list(paths)))}:{hash(tuple(sorted(pmi.items())))}:{hash(tuple(sorted(cgptki.items())))}", 
+        ttl=300)
 def aggregate_all_dependencies(
     tracker_paths: Set[str],
-    path_migration_info: PathMigrationInfo # Use the pre-built migration map
-) -> Dict[Tuple[str, str], Tuple[str, Set[str]]]:
+    path_migration_info: PathMigrationInfo,
+    current_global_path_to_key_info: Dict[str, KeyInfo] # NEW PARAMETER
+) -> Dict[Tuple[str, str], Tuple[str, Set[str]]]: # Output keys are Tuple[src_KEY#GI, tgt_KEY#GI]
     """
-    Reads all specified tracker files and aggregates dependencies, validating keys
-    found in trackers against the path migration map to ensure they represent
-    stable paths in the current state.
-
-    Args:
-        tracker_paths: A set of normalized paths to the tracker files.
-        path_migration_info: The authoritative map linking paths to their
-                             old and new keys, derived from global maps.
-
-    Returns:
-        A dictionary where:
-            Key: Tuple (source_key_str, target_key_str) representing a directed link.
-            Value: Tuple (highest_priority_dep_char, Set[origin_tracker_path_str])
-                   for that directed link across all trackers.
-                   Origin set contains paths of trackers where this link (with this char or lower priority) was found.
+    Aggregates dependencies from tracker files, resolving paths to current global KeyInfo objects
+    and then to their KEY#global_instance strings for instance-specific aggregation.
     """
-    aggregated_links: Dict[Tuple[str, str], Tuple[str, Set[str]]] = {}
-    config = ConfigManager() # Needed for priority
-    get_priority = config.get_char_priority
+    aggregated_links: Dict[Tuple[str, str], Tuple[str, Set[str]]] = {} # Key: (src_KEY#GI, tgt_KEY#GI)
+    config = ConfigManager() 
+    get_priority_from_char = config.get_char_priority
 
-    logger.info(f"Aggregating dependencies from {len(tracker_paths)} trackers using path migration map...")
+    logger.info(f"Aggregating dependencies (outputting KEY#global_instance) from {len(tracker_paths)} trackers...")
 
-    # Create helper map: old_key -> path (derived from path_migration_info for validation)
-    # We need this to map keys found in the file grid back to paths
-    old_key_to_stable_path: Dict[str, str] = {}
-    for path, (old_key, _new_key) in path_migration_info.items():
-        if old_key: # Only include paths that existed in the old state
-             if old_key in old_key_to_stable_path:
-                  # This indicates an old key was reused for different paths in the old map, error!
-                  logger.error(f"Aggregation Error: Old key '{old_key}' maps to multiple paths ('{old_key_to_stable_path[old_key]}' and '{path}') according to migration map. Inconsistent old global map?")
-                  # Continue might hide errors, maybe raise? For now, log and skip adding the duplicate.
-             else:
-                  old_key_to_stable_path[old_key] = path
+    for tracker_file_path in tracker_paths:
+        logger.debug(f"Aggregation: Processing tracker {os.path.basename(tracker_file_path)}")
+        tracker_data = read_tracker_file_structured(tracker_file_path) 
+        
+        definitions_ordered_from_file = tracker_data["definitions_ordered"] # List[Tuple[key_str_in_file, path_str_in_file]]
+        grid_headers_from_file = tracker_data["grid_headers_ordered"]       # List[key_str_in_file]
+        grid_rows_from_file = tracker_data["grid_rows_ordered"]             # List[Tuple[row_label_str_in_file, compressed_data_str]]
 
-    processed_trackers = 0
-    for tracker_path in tracker_paths:
-        logger.debug(f"Processing tracker for aggregation: {os.path.basename(tracker_path)}")
-        tracker_data = read_tracker_file(tracker_path) # Uses cache
-        grid_from_file = tracker_data.get("grid")
-        keys_from_file = tracker_data.get("keys") # Stale key -> path
-
-        if not grid_from_file or not keys_from_file:
-            logger.debug(f"Skipping empty tracker or missing keys/grid: {os.path.basename(tracker_path)}")
+        if not definitions_ordered_from_file or not grid_rows_from_file:
+            logger.debug(f"Aggregation: Skipping empty/incomplete data in: {os.path.basename(tracker_file_path)}")
             continue
+        
+        # Build an ordered list of current global KeyInfo objects corresponding to the tracker's definitions
+        # This list defines the structure of the grid being processed for *this* tracker.
+        effective_ki_list_for_this_tracker: List[Optional[KeyInfo]] = []
+        for _key_in_file, path_in_file in definitions_ordered_from_file:
+            mig_info = path_migration_info.get(path_in_file)
+            resolved_ki_for_this_def_entry: Optional[KeyInfo] = None
+            if mig_info and mig_info[1]: # Path is stable and has a current global base key
+                new_global_base_key = mig_info[1]
+                # Find the KeyInfo object in current_global_path_to_key_info. Prefer exact path match if key string is same.
+                resolved_ki_for_this_def_entry = next((ki for ki in current_global_path_to_key_info.values() if ki.key_string == new_global_base_key and ki.norm_path == path_in_file), None) \
+                                               or next((ki for ki in current_global_path_to_key_info.values() if ki.key_string == new_global_base_key), None) # Fallback to any path for this key
+            effective_ki_list_for_this_tracker.append(resolved_ki_for_this_def_entry)
 
-        # Get the OLD key list sorted according to the tracker file structure
-        old_keys_list_from_file = sort_key_strings_hierarchically(list(keys_from_file.keys()))
-
-        processed_rows = 0
-        skipped_unstable = 0
-        for old_row_key_from_file, compressed_row in grid_from_file.items():
-
-            # --- VALIDATION 1: Check Row Key Stability ---
-            row_path = old_key_to_stable_path.get(old_row_key_from_file)
-            if not row_path:
-                 # This old key didn't exist in the old global map or mapped to multiple paths
-                 # logger.debug(f"Agg Skip Row: Old key '{old_row_key_from_file}' from {os.path.basename(tracker_path)} not found in stable old_key_to_path map.")
-                 skipped_unstable += 1
-                 continue
-            migration_tuple_row = path_migration_info.get(row_path)
-            if not migration_tuple_row or migration_tuple_row[1] is None:
-                 # Path removed or old key was unstable globally
-                 # logger.debug(f"Agg Skip Row: Path '{row_path}' (from old key '{old_row_key_from_file}') unstable or removed.")
-                 skipped_unstable += 1
-                 continue
-            current_row_key = migration_tuple_row[1] # Get the CURRENT key
+        # Validate consistency after global resolution
+        if not (len(effective_ki_list_for_this_tracker) == len(grid_headers_from_file) and \
+                len(effective_ki_list_for_this_tracker) == len(grid_rows_from_file)):
+            logger.warning(f"Aggregation: Tracker '{os.path.basename(tracker_file_path)}' has inconsistent structure after global validation. "
+                           f"Effective KIs: {len(effective_ki_list_for_this_tracker)}, File Headers: {len(grid_headers_from_file)}, File Rows: {len(grid_rows_from_file)}. "
+                           "Skipping this tracker.")
+            continue
+        
+        for row_idx, (_row_label_in_file, compressed_row_str) in enumerate(grid_rows_from_file):
+            source_ki_global = effective_ki_list_for_this_tracker[row_idx]
+            if not source_ki_global: # Path for this row wasn't globally stable/valid or KI not found
+                continue 
+            
+            # Use the helper now in this file
+            source_key_gi_str = get_key_global_instance_string(source_ki_global, current_global_path_to_key_info)
+            if not source_key_gi_str:
+                logger.warning(f"Aggregation: Could not get global instance for source path {source_ki_global.norm_path} from {os.path.basename(tracker_file_path)}. Skipping row.")
+                continue
 
             try:
-                decompressed_row = decompress(compressed_row)
-                if len(decompressed_row) != len(old_keys_list_from_file):
-                     logger.warning(f"Aggregation: Row length mismatch for old key '{old_row_key_from_file}' in {os.path.basename(tracker_path)}. Skipping row.")
+                decompressed_row_chars = decompress(compressed_row_str)
+                if len(decompressed_row_chars) != len(effective_ki_list_for_this_tracker):
+                     logger.warning(f"Aggregation: Row {row_idx} (source KI: {source_key_gi_str}) in {os.path.basename(tracker_file_path)} "
+                                    f"has decompressed length {len(decompressed_row_chars)}, expected {len(effective_ki_list_for_this_tracker)}. Skipping row.")
                      continue
 
-                for old_col_idx, dep_char in enumerate(decompressed_row):
-                    # Skip diagonal, no-dependency, empty
-                    if dep_char in (DIAGONAL_CHAR, EMPTY_CHAR): continue
+                for col_idx, dep_char_val in enumerate(decompressed_row_chars):
+                    if dep_char_val in (DIAGONAL_CHAR, EMPTY_CHAR, PLACEHOLDER_CHAR): continue
+                    
+                    target_ki_global = effective_ki_list_for_this_tracker[col_idx]
+                    if not target_ki_global: # Path for this col wasn't globally stable/valid
+                        continue
+                    
+                    # Critical check: ensure we are not creating self-loops for the *same actual item*
+                    if source_ki_global.norm_path == target_ki_global.norm_path: 
+                        # This should ideally be caught by DIAGONAL_CHAR, but direct path check is safer
+                        # if keys might be duplicated for the same path (which shouldn't happen for global KIs).
+                        continue
 
-                    if old_col_idx >= len(old_keys_list_from_file): continue # Safety
-                    old_col_key_from_file = old_keys_list_from_file[old_col_idx]
-
-                    if old_row_key_from_file == old_col_key_from_file: continue # Should be caught by DIAGONAL_CHAR check, but belts and braces
-
-                    # --- VALIDATION 2: Check Column Key Stability ---
-                    col_path = old_key_to_stable_path.get(old_col_key_from_file)
-                    if not col_path:
-                         # logger.debug(f"Agg Skip Cell: Old col key '{old_col_key_from_file}' not stable.")
-                         skipped_unstable += 1
-                         continue
-                    migration_tuple_col = path_migration_info.get(col_path)
-                    if not migration_tuple_col or migration_tuple_col[1] is None:
-                         # logger.debug(f"Agg Skip Cell: Col Path '{col_path}' unstable/removed.")
-                         skipped_unstable += 1
-                         continue
-                    current_col_key = migration_tuple_col[1] # Get the CURRENT key
-
-                    # --- Both paths are stable, process the dependency ---
-                    current_link = (current_row_key, current_col_key)
-                    existing_char, existing_origins = aggregated_links.get(current_link, (None, set()))
+                    target_key_gi_str = get_key_global_instance_string(target_ki_global, current_global_path_to_key_info)
+                    if not target_key_gi_str:
+                        logger.warning(f"Aggregation: Could not get global instance for target path {target_ki_global.norm_path} from {os.path.basename(tracker_file_path)}. Skipping cell.")
+                        continue
+                    
+                    current_link_gi = (source_key_gi_str, target_key_gi_str) # Now a KEY#GI to KEY#GI link
+                    existing_char, existing_origins = aggregated_links.get(current_link_gi, (None, set()))
 
                     try:
-                        current_priority = get_priority(dep_char)
-                        existing_priority = get_priority(existing_char) if existing_char else -1 # Assign lowest priority if non-existent
-                    except KeyError as e:
-                         logger.warning(f"Invalid dependency character '{str(e)}' found in {tracker_path} for {old_row_key_from_file}->{old_col_key_from_file}. Skipping.")
-                         continue
+                        current_priority = get_priority_from_char(dep_char_val)
+                        existing_priority = get_priority_from_char(existing_char) if existing_char else -1
+                    except KeyError: 
+                        logger.warning(f"Aggregation: Invalid dep char '{dep_char_val}' in {os.path.basename(tracker_file_path)}. Skipping cell for link {source_key_gi_str} -> {target_key_gi_str}."); 
+                        continue
 
                     if current_priority > existing_priority:
-                        # New char has higher priority, replace char and reset origins
-                        aggregated_links[current_link] = (dep_char, {tracker_path})
+                        aggregated_links[current_link_gi] = (dep_char_val, {tracker_file_path})
                     elif current_priority == existing_priority:
-                        if dep_char == existing_char: # Only add origin if char is identical
-                            existing_origins.add(tracker_path)
-                            aggregated_links[current_link] = (dep_char, existing_origins)
-                        else: # Same priority, different char - new one wins, resets origins
-                            aggregated_links[current_link] = (dep_char, {tracker_path})
-                            logger.debug(f"Same priority, different char for {current_link}: old='{existing_char}', new='{dep_char}'. New char wins.")
+                        if dep_char_val == existing_char: 
+                            existing_origins.add(tracker_file_path) # No need to reassign tuple if set is mutable
+                        elif existing_char == 'n': 
+                            pass # Keep 'n' if new char has same priority but isn't 'n'
+                        elif dep_char_val == 'n': # New char is 'n' and has same priority as existing non-'n'
+                            aggregated_links[current_link_gi] = (dep_char_val, {tracker_file_path}) # 'n' overwrites
+                        else: # Different chars, same priority, neither is 'n' - current tracker file "wins"
+                            aggregated_links[current_link_gi] = (dep_char_val, {tracker_file_path})
+                            logger.debug(f"Aggregation conflict (same priority): {current_link_gi} was '{existing_char}', overwritten by '{dep_char_val}' from {os.path.basename(tracker_file_path)}.")
+            except Exception as e_agg_row:
+                logger.warning(f"Aggregation: Error processing row {row_idx} for source KI {source_key_gi_str} in {os.path.basename(tracker_file_path)}: {e_agg_row}", exc_info=False) # Less verbose exc_info
 
-                processed_rows += 1
-
-            except Exception as e:
-                logger.warning(f"Aggregation: Error processing row for old key '{old_row_key_from_file}' in {os.path.basename(tracker_path)}: {e}")
-        
-        if skipped_unstable > 0:
-            logger.debug(f"Aggregation for {os.path.basename(tracker_path)}: Skipped {skipped_unstable} cells/rows due to unstable/removed paths.")
-        processed_trackers += 1
-
-    logger.info(f"Aggregation complete. Processed {processed_trackers} trackers. Found {len(aggregated_links)} unique directed links (based on current keys for stable paths).")
+    logger.info(f"Aggregation complete. Found {len(aggregated_links)} unique KEY#global_instance directed links.")
     return aggregated_links
 
 # --- End of tracker_utils.py ---

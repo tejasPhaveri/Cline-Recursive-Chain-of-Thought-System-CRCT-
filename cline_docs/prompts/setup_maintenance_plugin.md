@@ -102,7 +102,7 @@ This order is crucial because Mini-Trackers capture detailed cross-directory dep
           python -m cline_utils.dependency_system.dependency_processor show-keys --tracker <path_to_doc_tracker.md>
           ```
           *(Use actual path, likely `{memory_dir}/doc_tracker.md` based on config)*
-        *   Examine the output. Identify all lines ending with `(checks needed: ...)`. This indicates unresolved 'p', 's', or 'S' characters in that key's row *within this tracker*.
+        *   Examine the output. Keys listed might be base keys (e.g., "1A1") or globally instanced keys (e.g., "2B1#1") if their base key string is used for multiple different paths in the project. Identify all lines ending with `(checks needed: ...)`. This indicates unresolved 'p', 's', or 'S' characters in that key's row *within this tracker*.
         *   Create a list of these keys needing verification for `doc_tracker.md`. If none, state this and proceed to Stage 2.
     *   **B. Verify Placeholders/Suggestions for Identified Keys**:
         *   Iterate through the list of keys from Step 2.A.
@@ -123,9 +123,9 @@ This order is crucial because Mini-Trackers capture detailed cross-directory dep
             *   **State Reasoning (MANDATORY)**: Before using `add-dependency`, **clearly state your reasoning** for the chosen dependency character (`<`, `>`, `x`, `d`, or `n`) for *each specific relationship* you intend to set, based on your direct file analysis and the functional reliance criteria.
         *   **Correct/Confirm Dependencies**: Use `add-dependency`, specifying `--tracker <path_to_doc_tracker.md>`. The `--source-key` is always the `key_string` you are iterating on. The `--target-key` is the column key whose relationship you determined. Set the `--dep-type` based on your reasoned analysis. Batch multiple targets *for the same source key* if they share the *same new dependency type*.
               ```bash
-              # Example: Set '>' from 1A2 (source) to 2B1 (target) in doc_tracker.md
+              # Example: Set '>' from 1A2 (source) to 2B1#3 (target) in doc_tracker.md
               # Reasoning: docs/setup.md (1A2) details steps required BEFORE using API described in docs/api/users.md (2B1). Thus, 2B1 depends on 1A2.
-              python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker <path_to_doc_tracker.md> --source-key 1A2 --target-key 2B1 --dep-type ">"
+              python -m cline_utils.dependency_system.dependency_processor add-dependency --tracker <path_to_doc_tracker.md> --source-key 1A2 --target-key 2B1#3 --dep-type ">"
 
               # Example: Set 'n' from 1A2 (source) to 3C1 and 3C2 (targets) in doc_tracker.md
               # Reasoning: Files 3C1 and 3C2 are unrelated examples; no functional dependency on setup guide 1A2.
@@ -176,6 +176,7 @@ This order is crucial because Mini-Trackers capture detailed cross-directory dep
     *   **A. Identify Code and Doc Keys**:
         *   Use `show-keys` on relevant trackers (mini-trackers, main tracker) to get lists of code keys.
         *   Use `show-keys --tracker <path_to_doc_tracker.md>` to get a list of documentation keys.
+        *The output keys might be `KEY` or `KEY#GI`. You need to resolve these to their specific global `KeyInfo` objects (paths and base keys) to perform the conceptual matching.*
         *   *(Alternatively, use internal logic based on `ConfigManager` and the global key map if more efficient)*.
     *   **B. Iterate Through Code Keys**:
         *   Select a code key (e.g., `code_key_string` representing a specific code file).

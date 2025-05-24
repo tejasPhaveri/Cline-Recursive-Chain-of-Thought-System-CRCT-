@@ -1,3 +1,5 @@
+# config_manager.py
+
 """
 Configuration module for dependency tracking system.
 Handles reading and writing configuration settings.
@@ -115,25 +117,30 @@ DEFAULT_CONFIG = {
         "src/node_modules",
         "src/client/node_modules"
     ],
-    "allowed_dependency_chars": ['<', '>', 'x', 'd', 's', 'S'],
+    "allowed_dependency_chars": ['<', '>', 'x', 'd', 's', 'S', 'n'],
     "excluded_file_patterns": [
         "*_module.md",
         "implementation_plan_*.md",
-        "*_task.md" # Future task file pattern (to be confirmed)
+        "*_task.md",
+        "*-checkpoint.md"
     ],
     "visualization": {
         "auto_generate_on_analyze": True, # Enable auto-generation by default
         "auto_diagram_output_dir": None   # Default to None, meaning derive from memory_dir
                                           # If user sets this (e.g., "my_diagrams"), it overrides the default derivation
-    }
+    },
+    "recovery": {
+        "auto_restore_corrupt_tracker_from_backup": False, # Default: False (safer, prompts or rebuilds)
+        "backup_on_restore_attempt": True # Default: True (backup the corrupt file before overwriting with backup)
+    }    
 }
 
 # Define character priorities (Higher number = higher priority) - Centralized definition
 # Conforms to the existing convention in dependency_suggester.py
 CHARACTER_PRIORITIES = {
     'x': 5,
-    '<': 4, '>': 4, 'd': 4, 'n': 4,
-    'S': 3,
+    '<': 4, '>': 4, 'n': 4,
+    'd': 3, 'S': 3,
     's': 2,
     'p': 1, 'o': 1,
     '-': 0, # Placeholder_char (Assign lowest numeric priority > 0)
@@ -163,21 +170,37 @@ class ConfigManager:
         return cls._instance
 
     def __init__(self):
-        """Initialize the configuration manager and load config."""
-        if self._initialized:  # Correct check for double initialization
-            return
-
-        self._config = None  # Initialize config
-        self._config_path = None # Initialize config path
-        self._load_config()  # Load or create default config
+        if self._initialized: return
+        self._config: Optional[Dict[str, Any]] = None
+        self._config_path: Optional[str] = None
+        self._load_config()
         
-        # Set default exclusions if not present
-        if "excluded_dirs" not in self._config:
-            self._config["excluded_dirs"] = DEFAULT_CONFIG["excluded_dirs"]
-        if "excluded_extensions" not in self._config:
-            self._config["excluded_extensions"] = DEFAULT_CONFIG["excluded_extensions"]
+        # Ensure defaults for some top-level keys if missing after load
+        for key, default_value in [
+            ("excluded_dirs", DEFAULT_CONFIG["excluded_dirs"]),
+            ("excluded_extensions", DEFAULT_CONFIG["excluded_extensions"]),
+            ("paths", DEFAULT_CONFIG["paths"]),
+            ("recovery", DEFAULT_CONFIG["recovery"]) # Ensure recovery section exists
+        ]:
+            if key not in self._config: # type: ignore
+                self._config[key] = default_value # type: ignore
 
         self._initialized = True
+
+    def get_recovery_setting(self, setting_name: str, default_override: Any = None) -> Any:
+        """Gets a setting from the 'recovery' section of the config."""
+        recovery_settings = self.config.get("recovery", DEFAULT_CONFIG.get("recovery", {}))
+        
+        # Determine the ultimate default value
+        # 1. Use default_override if provided
+        # 2. Else, use default from DEFAULT_CONFIG for this specific setting_name
+        # 3. Else, None (though our DEFAULT_CONFIG for recovery is complete)
+        if default_override is not None:
+            ultimate_default = default_override
+        else:
+            ultimate_default = DEFAULT_CONFIG.get("recovery", {}).get(setting_name)
+            
+        return recovery_settings.get(setting_name, ultimate_default)
 
     def get_compute_setting(self, setting_name: str, default: Any = None) -> Any:
         """Gets a setting from the 'compute' section of the config."""
@@ -241,10 +264,20 @@ class ConfigManager:
         Returns:
             True if successful, False otherwise
         """
+        config_path = self.config_path # Ensure path is initialized
         try:
             os.makedirs(os.path.dirname(normalize_path(self.config_path)), exist_ok=True)
             with open(normalize_path(self.config_path), 'w', encoding='utf-8') as f:
-                json.dump(self._config, f, indent=2)
+                json.dump(self._config, f, indent=2, ensure_ascii=False)
+            logger.info(f"Configuration saved to {config_path}")
+                        
+            # Invalidate config cache if using cache_manager
+            try:
+                from .cache_manager import invalidate_cache_entry
+                invalidate_cache_entry("config_data", f"config:{os.path.getmtime(config_path)}")
+            except ImportError: pass # Cache manager not available
+            except Exception as e_cache: logger.warning(f"Could not invalidate config cache: {e_cache}")
+
             return True
         except OSError as e:
             logger.error(f"Error writing configuration file {self.config_path}: {e}")

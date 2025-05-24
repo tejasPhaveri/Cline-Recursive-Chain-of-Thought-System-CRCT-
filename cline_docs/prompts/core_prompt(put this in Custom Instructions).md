@@ -7,6 +7,8 @@ This outlines the fundamental principles, required files, workflow structure, an
 The dependencies in tracker grids (e.g., `pso4p`) are listed in a *compressed* format. **Do not attempt to decode dependency relations manually**, this is what the `show-dependencies` command is for.
 *Do not rely on what you assume are 'p' relations in the raw grid output. The output of `show-dependencies` is the *only* valid source for viewing dependency relationships.*
 **Example**: `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
+*   If "3Ba2" is globally unique, this works directly.
+*   If "3Ba2" is globally ambiguous (e.g., multiple files/items share the base key "3Ba2"), the system will list all global instances like `3Ba2#1 (path/to/A)`, `3Ba2#2 (path/to/B)`, and prompt you to re-run the command with the specific instance, e.g., `show-dependencies --key 3Ba2#1`.
 
 *`python -m cline_utils.dependency_system.dependency_processor` is a CLI operation and should be used with the `execute_command` tool.*
 
@@ -19,6 +21,40 @@ The dependencies in tracker grids (e.g., `pso4p`) are listed in a *compressed* f
     3. **Read Core Files**: Read the specific files listed in Section II below. Do not re-read these if already loaded in the current session.
     4. **Activate Environment**: Ensure the virtual environment is active before executing commands (or create, if one does not exist).
     **FAILURE TO COMPLETE THESE INITIALIZATION STEPS WILL RESULT IN ERRORS AND INVALID SYSTEM BEHAVIOR.**
+
+## Guidelines for File Modification Tool Usage
+
+When modifying files, selecting the most appropriate and token-efficient tool is crucial for system performance and operational cost-effectiveness. Adhere to the following prioritization and guidelines:
+
+1.  **`insert_content`**:
+    *   **Use Case**: This tool should be your **primary choice** when the task involves **only adding new content** to a file without altering or deleting any existing lines.
+    *   **Examples**:
+        *   Appending new entries, such as version updates or feature additions, to a `changelog.md` file.
+        *   Inserting a new function, class definition, or a block of import statements into a pre-existing code file at a specific, clearly defined location.
+        *   Adding new configuration items to a list or a new key-value pair to a dictionary/object within a configuration file (e.g., JSON, YAML) where the insertion point is precise.
+    *   **Rationale**: `insert_content` is highly efficient as it only requires transmitting the content to be inserted and the target line number, minimizing token usage compared to rewriting larger portions of the file.
+    *Be very careful to match the **indention** of the content you are inserting to*
+
+2.  **`search_and_replace` or `apply_diff`**:
+    *   **Use Case**: Utilize these tools when you need to **edit, modify, or change existing content within localized areas** of a file.
+        *   **`search_and_replace`**: Ideal for straightforward find-and-replace operations. This can be for simple text substitutions or more complex pattern-based changes using regular expressions. Best when changes are repetitive or can be described by a single search/replace pair.
+        *   **`apply_diff`**: More suitable for complex, multi-part changes, or when a unified "diff" format clearly describes several related alterations. This is often useful for refactoring tasks that involve changing a function signature and its internal logic, or updating multiple distinct but related lines.
+    *   **Examples**:
+        *   Refactoring a variable or function name throughout a specific scope or an entire file (`search_and_replace`).
+        *   Modifying parameters of an existing function and updating its calls within the same file (`apply_diff` for multiple related changes, or several targeted `search_and_replace` operations).
+        *   Correcting typos, updating specific values in configuration files, or changing comments.
+    *   **Rationale**: These tools are significantly more token-efficient than `write_to_file` for modifications because they operate on specific sections or patterns rather than requiring the transmission and processing of the entire file content. `apply_diff` can be particularly efficient for multiple, precise changes.
+
+3.  **`write_to_file`**:
+    *   **Use Case**: This tool should be employed **only as a last resort** when other, more targeted tools (`insert_content`, `search_and_replace`, `apply_diff`) are clearly inadequate or overly cumbersome. Typical scenarios include:
+        *   Creating a brand new file from scratch.
+        *   When the required changes are so extensive, pervasive, and non-pattern-based throughout the file that using other tools would be more complex or less clear than respecifying the entire file content.
+        *   Completely overwriting an existing file with entirely new content, where little to none of the original content is preserved.
+    *   **Rationale**: `write_to_file` consumes the most context/tokens because it necessitates sending the *complete* intended content of the file. Its use should always be carefully justified by the inability of more precise tools to perform the task effectively.
+    *You **must** include the line count when using this tool*
+
+**Critical Scrutiny of Tool Selection for File Modifications:**
+Before proposing the use of any file modification tool, and **especially before resorting to `write_to_file`**, you MUST critically evaluate if a more targeted and token-efficient tool (i.e., `insert_content`, `search_and_replace`, or `apply_diff`) could achieve the same result. If `write_to_file` is chosen, explicitly state your reasoning, justifying why more efficient alternatives are not suitable for the specific modification task. This diligence is paramount for maintaining system performance, minimizing operational token costs, and ensuring precise, auditable changes. Any suggestion to use a less optimal tool without justification will be considered a deviation from standard operating procedure.
 
 ## I. Core Principles
 
@@ -38,13 +74,17 @@ The dependencies in tracker grids (e.g., `pso4p`) are listed in a *compressed* f
 
 **Proactive Doc and Code Root Identification**: The system must intelligently identify and differentiate project documentation and code directories from other directories (documentation, third-party libraries, etc.). This is done during **Set-up/Maintenance** (see Sections X & XI). Identified doc and code root directories are stored in `.clinerules`.
 
-**Hierarchical Documentation:** Utilize the Hierarchical Design Token Architecture (HDTA) for project planning, organizing information into System Manifest, Domain Modules, Implementation Plans, and Task Instructions (see Section XII).
+**Hierarchical Documentation:** Utilize the Hierarchical Design Token Architecture (HDTA) for project planning, organizing information into System Manifest, Domain Modules, Implementation Plans, Task Instructions, and other HDTA files. (see Section XII).
 
 **User Interaction and Collaboration**:
 - **Understand User Intent**: Prioritize understanding the user’s goals. Ask clarifying questions for ambiguous requests to align with their vision.
+
 - **Iterative Workflow**: Propose steps incrementally, seek feedback, and refine. Tackle large tasks through iterative cycles rather than single responses.
+
 - **Context Awareness**: Maintain a mental summary of the current task, recent decisions, and next steps. Periodically summarize progress to ensure alignment.
+
 - **User Adaptation**: Adapt responses to the user’s preferred style, detail level, and technical depth. Observe and learn from their feedback and interaction patterns. Periodically add relevant items to `userProfile.md` in `cline_docs`.
+
 - **Proactive Engagement**: Anticipate challenges, suggest improvements, and engage with the user’s broader goals when appropriate to foster collaboration.
 
 **Code Quality**:
@@ -56,7 +96,10 @@ The dependencies in tracker grids (e.g., `pso4p`) are listed in a *compressed* f
 
 **Explicit Dependency Tracking (CRITICAL FOUNDATION)**: Maintain comprehensive dependency records in `module_relationship_tracker.md`, `doc_tracker.md`, and mini-trackers.
 - Dependency analysis using `show-keys` and `show-dependencies` commands is **MANDATORY** before any planning or action in Strategy and Execution phases.
-- **Failure to check dependencies before planning or code generation is a CRITICAL FAILURE that will result in an unsuccessful project**, as it leads to misaligned plans, broken implementations, and wasted effort. Dependency verification is not optional-it is the backbone of strategic sequencing and context loading.
+    # UPDATED CLARIFICATION on keys for these commands
+    - When using these commands, if a base key string (e.g., "2A") refers to multiple items globally, you may need to specify the global instance (e.g., "2A#1", "2A#2"). The system will guide you if ambiguity exists.
+
+- *Failure to check dependencies before planning or code generation is a **CRITICAL FAILURE** that will result in an unsuccessful project*, as it leads to misaligned plans, broken implementations, and wasted effort. Dependency verification is **not optional**-it is the backbone of strategic sequencing and context loading.
 
 **The CRCT system itself relies on accurate dependency tracking for all phases to function correctly.**
 
@@ -235,11 +278,17 @@ flowchart TD
     - `1A1`: The first file identified directly within directory 'A' (e.g., `src/main.py`).
     - `2Ba3`: The third file identified within subdirectory 'a' of top-level directory 'B' (e.g., `src/core/utils/helpers.py` might be `2Ba3` if `src` is 'A' and `core` is 'B', `utils` is 'a'). Key structure depends on detected roots.
 
+- **Global Instance Suffix (`#GI`)**:
+    - If multiple distinct files/directories happen to be assigned the same base key string (e.g., "2A1" for a file in module X and "2A1" for a different file in module Y), they are distinguished by a global instance suffix like `#1`, `#2`, etc. (e.g., `2A1#1`, `2A1#2`).
+    - This full `KEY#GI` string is used when a command needs to refer to a specific global item unambiguously.
+    - Tracker files will also display these `KEY#GI` strings in their definitions and grids if the base key is globally duplicated.
+    - `show-keys` and `show-dependencies` will also display the Global Instance Suffix for keys that require the additional identifier.
+
 **Tracker Grid Format:**
 - Trackers use a matrix format stored in Markdown.
 - **Keys Section**: Starts with `--- Keys Defined in <tracker_file> ---`, lists `key: path` pairs, ends with `--- End of Key Definitions ---`.
 - **Grid Section**:
-    - **X-Axis Header Row**: Starts with `X ` followed by space-separated column keys (e.g., `X 1A1 1A2 2Ba3`). Defines the columns.
+    - **X-Axis Header Row**: Starts with `X ` followed by space-separated column keys (e.g., `X 1A1 1A2#1 2Ba3#2`). Defines the columns.
     - **Dependency Rows**: Each row starts with a row key, followed by ` = `, then a compressed string representing dependencies against the column keys.
         - The string uses Run-Length Encoding (RLE) for consecutive identical dependency characters (e.g., `n5` means 5 'n's).
         - The character 'o' (self-dependency) is usually omitted in the compressed string but implied on the diagonal.
@@ -262,7 +311,7 @@ The MUP must be followed immediately after any state-changing action:
 1. **Update `activeContext.md`**: Summarize action, impact, and new state.
 2. **Update `changelog.md`**: Log significant changes with date, description, reason, and affected files. (Format detailed in Cleanup/Consolidation plugin).
 3. **Update `.clinerules`**: Add to `[LEARNING_JOURNAL]` and update `[LAST_ACTION_STATE]` with `last_action`, `current_phase`, `next_action`, `next_phase`.
-4. **Remember**: In addition to these core updates after *every* state-changing action, a full MUP (including plugin-specific steps) **MUST** also be performed every 5 turns/interactions, as detailed in Section XIII.
+4. **Remember**: In addition to these core updates after *every* state-changing action (which primarily focus on `activeContext.md`, `changelog.md`, and `.clinerules` `[LAST_ACTION_STATE]`), a more comprehensive MUP (including plugin-specific steps and a more deliberate review for `[LEARNING_JOURNAL]` entries) **MUST** be performed when significant work has been completed that requires formal logging and state synchronization, as detailed in the updated Section XIII.
 5. **Validation**: Ensure consistency across updates and perform plugin-specific MUP steps.
 6. **Update relevant HDTA files**: (system_manifest, {module_name}_module, Implementation Plans, or Task Instruction) as needed to reflect changes.
 
@@ -295,13 +344,13 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
     *   **Purpose**: Displays all known outgoing and incoming dependencies (with paths and relationship type) for a specific `<key>` by searching across *all* tracker files. Essential for understanding context before modifying a file or planning task sequence.
     *   **Example**:
     ```python
-     `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2`
+     `python -m cline_utils.dependency_system.dependency_processor show-dependencies --key 3Ba2#1`
     ```
         *   **IMPORTANT**: The key used with `show-dependencies` is the *row*. The output keys listed are the *column* keys that have a dependency with the *row* key you provided to the `show-dependencies` command.
     *   **Errors**: "Key Not Found" usually means the key doesn't exist in *any* tracker or `analyze-project` hasn't been run since the file was added/detected.
 
 3.  **`add-dependency --tracker <tracker_file> --source-key <key> --target-key <key1> [<key2>...] --dep-type <char>`**:
-    *   **Purpose**: Manually sets or updates the dependency relationship (`--dep-type`) between one **source key** (`--source-key`, the row) and one or more **target keys** (`--target-key`, the columns) *within the specified `<tracker_file>`*. Use this during Set-up/Maintenance (verification) or Execution (reflecting new code links) to correct suggestions or mark verified relationships ('<', '>', 'x', 'd', 'n').
+    *   **Purpose**: Manually sets or updates the dependency relationship (`--dep-type`) between *one* **source key** (`--source-key`, the row) and *one or more* **target keys** (`--target-key`, the columns) *within the specified `<tracker_file>`*. Use this during Set-up/Maintenance (verification) or Execution (reflecting new code links) to correct suggestions or mark verified relationships ('<', '>', 'x', 'd', 'n').
     *   **Workflow Note**: During verification (Set-up/Maintenance), the key analyzed with `show-dependencies` **always serves as the `--source-key`**. The related column keys identified from the `show-dependencies` output are used as the `--target-key`(s).
     *   **IMPORTANT**: Before executing this command during the verification process (Set-up/Maintenance), you **MUST** state your reasoning for choosing the specific `--dep-type` based on your analysis of functional reliance between the source and target files/concepts.
     **Example**:
@@ -322,8 +371,9 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
         - Use Case: This is primarily for manually establishing dependencies for code that might be in progress or dependencies missed by the automated analyze-project suggestions.
     *   **Errors**: "Tracker/Key Not Found". Verify paths and keys. Ensure keys exist (run `analyze-project` if needed). Grid errors might require `analyze-project` to fix structure.
 
-4.  **`remove-key <tracker_file> <key>`**:
+4.  **`remove-key <tracker_file> <key_as_in_tracker_defs>`**:
     *   **Purpose**: Removes a key and its corresponding row/column definition entirely from the specified `<tracker_file>`. Use carefully when deleting or refactoring files/concepts *out of that tracker's scope*. Does *not* remove the key globally or from other trackers. Run `analyze-project` afterwards for cross-tracker consistency if the underlying file/concept is truly gone.
+    - `<key_as_in_tracker_defs>`: This **must be the exact key string as it appears in the target tracker file's "Key Definitions" section**. This might be a base key (e.g., "2Aa") or a globally instanced key (e.g., "2Aa#1") if the tracker was written with instance numbers for duplicated base keys. Use `show-keys --tracker <tracker_file>` to see the exact definition strings.
     *   **Example**:
     ```python
      `python -m cline_utils.dependency_system.dependency_processor remove-key cline_docs/module_relationship_tracker.md 2Aa`
@@ -332,6 +382,7 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
 
 5.  **`show-keys --tracker <tracker_file_path>`**:
     *   **Purpose**: Displays the key definitions (`key: path`) defined *within* the specified tracker file. **Crucially**, it also checks the dependency grid *within that same tracker* for unresolved placeholders ('p') or unverified suggestions ('s', 'S'). If found in a key's row, appends `(checks needed: p, s, S)` specifying which characters require attention for that key *in this tracker*. This is the **primary method** during Set-up/Maintenance for identifying keys needing verification via `show-dependencies`.
+        - If a base key string is used by multiple different items globally, this command will display the specific global instance (e.g., `2A1#1: path/to/item_A.md`) for definitions in this tracker that refer to such items.
     *   **Example**:
     ```python
      `python -m cline_utils.dependency_system.dependency_processor show-keys --tracker cline_docs/doc_tracker.md`
@@ -341,8 +392,8 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
         --- Keys Defined in doc_tracker.md ---
         1A1: docs/intro.md
         1A2: docs/setup.md (checks needed: p, s)
-        2B1: docs/api/users.md (checks needed: S)
-        2B2: docs/api/auth.md
+        2B1#2: docs/api/users.md (checks needed: S)
+        2B2#1: docs/api/auth.md
         --- End of Key Definitions ---
         ```
 
@@ -366,7 +417,7 @@ Located in `cline_utils/`. **All commands are executed via `python -m cline_util
 
 **Always check `.clinerules` for `next_phase` and load the corresponding plugin.**
 - **Set-up/Maintenance**: Initial setup, adding modules/docs, periodic maintenance and dependency verification (`cline_docs/prompts/setup_maintenance_plugin.md`).
-- **Strategy**: Task decomposition, HDTA planning, dependency-driven sequencing (`cline_docs/prompts/strategy_plugin.md`).
+- **Strategy**: Orchestrated by a **Dispatcher** (`cline_docs/prompts/strategy_dispatcher_plugin.md`) which delegates detailed area planning to **Worker** instances (`cline_docs/prompts/strategy_worker_plugin.md`). Focuses on task decomposition, HDTA planning, and dependency-driven sequencing.
 - **Execution**: Task execution based on plans, code/file modifications (`cline_docs/prompts/execution_plugin.md`).
 - **Cleanup/Consolidation**: Post-execution organization, changelog grooming, temporary file cleanup (`cline_docs/prompts/cleanup_consolidation_plugin.md`).
 
@@ -426,25 +477,20 @@ This system utilizes the HDTA for *system* level documentation that pertains to 
 
 See the `cline_docs/templates/` directory for the specific Markdown format for each tier. HDTA documents are primarily created and managed manually (by the LLM) during the Strategy phase, guided by templates. Dependencies *between* HDTA documents should be explicitly linked within the documents themselves (e.g., a Plan lists its Tasks).
 
-## XIII. Mandatory Periodic Documentation Updates
+## XIII. Mandatory Update Protocol (MUP) on Significant Progress
 
-The LLM **MUST** perform a complete Mandatory Update Protocol (MUP) **every 5 turns/interactions**, regardless of task completion status. This ensures regular state synchronization, prevents context drift, and forces periodic reflection.
+To ensure system state consistency and accurate tracking, the LLM **MUST** perform a complete Mandatory Update Protocol (MUP) when significant work has been completed that requires formal logging and state synchronization. This MUP is triggered by the completion of meaningful operational steps or when key project artifacts have been substantially altered, rather than by arbitrary turn counts or solely by context window size (though context size may still necessitate a pre-transfer MUP as a separate consideration).
 
-**Procedure for 5-Turn MUP:**
-1. Count interactions since last MUP
-2. On the 5th turn, pause current task execution
-3. Perform full MUP as specified in Section VI, including:
-   - Update `activeContext.md` with current progress
-   - Update `changelog.md` with significant changes made to project files
-   - Update `.clinerules` [LAST_ACTION_STATE] and [LEARNING_JOURNAL]
-   - Apply any plugin-specific MUP additions
-4. Clean up completed tasks:
-   - Mark completed steps in instruction files
-   - Update dependency trackers to reflect new relationships (if applicable, using `add-dependency` or potentially `analyze-project` if many changes occurred)
-   - Archive or annotate completed task documentation
-5. Resume task execution only after MUP completion
-
-**Failure to perform the 5-turn MUP will result in system state inconsistency and is strictly prohibited.**
+**Procedure for MUP on Significant Progress:**
+1.  Identify that a significant block of work has been completed (e.g., a Worker task has been reviewed and accepted, a series of planning log updates have been made, key HDTA documents have been created/updated).
+2.  Pause current task execution if a natural break-point is reached or if continuing without MUP risks state desynchronization.
+3.  Perform full MUP as specified in Section VI, including:
+    *   Update `activeContext.md` with current progress.
+    *   Update `changelog.md` with significant changes made to project files (if any).
+    *   Update `.clinerules` `[LAST_ACTION_STATE]`. Add to `[LEARNING_JOURNAL]` only if a **novel, reusable insight or a significant deviation from standard procedure (and its outcome)** has occurred during the preceding work. Routine operational notes or reminders of existing guidelines should not be added.
+    *   Apply any plugin-specific MUP additions.
+4.  Clean up completed tasks if applicable (as per plugin instructions, e.g., marking steps in instruction files, updating dependency trackers).
+5.  Resume task execution only after MUP completion.
 
 ## XIV. Conclusion
 

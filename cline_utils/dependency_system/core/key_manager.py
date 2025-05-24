@@ -43,7 +43,10 @@ ASCII_Z_LOWER = 122 # ASCII value for 'z'
 
 # Updated pattern to allow multi-digit tiers and file numbers,
 # and structure Tier + Dir + [Subdir + [File] | File]
-HIERARCHICAL_KEY_PATTERN = r'^[1-9]\d*[A-Z](?:[a-z](?:[1-9]\d*)?|[1-9]\d*)?$'
+HIERARCHICAL_KEY_PATTERN = r'[1-9]\d*[A-Z](?:[a-z](?:[1-9]\d*)?|[1-9]\d*)?'
+HIERARCHICAL_KEY_PATTERN_INSTANCE = r'(?:#[1-9][0-9]*)?' # Optional: # followed by a non-zero digit, then any digits
+KEY_VALIDATION_PATTERN = re.compile(f"{HIERARCHICAL_KEY_PATTERN}({HIERARCHICAL_KEY_PATTERN_INSTANCE})$")
+
 # Pattern for splitting keys into sortable parts (numbers and non-numbers)
 KEY_PATTERN = r'\d+|\D+'
 GLOBAL_KEY_MAP_FILENAME = "global_key_map.json"
@@ -455,14 +458,14 @@ def load_old_global_key_map() -> Optional[Dict[str, KeyInfo]]:
 
 def validate_key(key: str) -> bool:
     """
-    Validate if a key follows the hierarchical key format.
+    Validate if a key follows the hierarchical key format, optionally followed by '#' and digits (for instance).
     Args:
         key: The hierarchical key to validate
     Returns:
         True if valid, False otherwise
     """
     if not key: return False # Handle empty strings
-    return bool(re.match(HIERARCHICAL_KEY_PATTERN, key))
+    return bool(re.match(KEY_VALIDATION_PATTERN, key))
 
 def get_path_from_key(key_string: str, path_to_key_info: Dict[str, KeyInfo], context_path: Optional[str] = None) -> Optional[str]:
     """
