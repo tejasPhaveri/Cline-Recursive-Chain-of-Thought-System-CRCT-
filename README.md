@@ -2,7 +2,7 @@
 
 Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework designed to manage context, dependencies, and tasks in large-scale Cline projects within VS Code. Built for the Cline extension, CRCT leverages a recursive, file-based approach with a modular dependency tracking system to maintain project state and efficiency as complexity increases.
 
-- Version **v7.8**: Introduces dependency visualization, overhauls the Strategy phase for iterative roadmap planning, and refines Hierarchical Design Token Architecture (HDTA) templates.
+- Version **v7.85**: Introduces dependency visualization, overhauls the Strategy phase for iterative roadmap planning, and refines Hierarchical Design Token Architecture (HDTA) templates.
     - **Dependency Visualization (`visualize-dependencies`)**:
         - Added a new command to generate Mermaid diagrams visualizing project dependencies.
         - Supports project overview, module-focused (internal + interface), and multi-key focused views.
@@ -13,6 +13,7 @@ Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework d
         - Clarified primary objective as **hierarchical project roadmap construction and maintenance** using HDTA.
         - Integrated instructions for leveraging dependency diagrams (auto-generated or on-demand) to aid analysis.
         - Refined state management (`.clinerules` vs. `activeContext.md`).
+        - Split into Dispatch and Worker prompts to take advantage of new_task
     - **HDTA Template Updates**:
         - Reworked `implementation_plan_template.md` for objective/feature focus.
         - Added clarifying instructions to `module_template.md` and `task_template.md`.
