@@ -1,4 +1,4 @@
-# Cline Recursive Chain-of-Thought System (CRCT) - v7.8
+# Cline Recursive Chain-of-Thought System (CRCT) - v7.85
 
 Welcome to the **Cline Recursive Chain-of-Thought System (CRCT)**, a framework designed to manage context, dependencies, and tasks in large-scale Cline projects within VS Code. Built for the Cline extension, CRCT leverages a recursive, file-based approach with a modular dependency tracking system to maintain project state and efficiency as complexity increases.
 
